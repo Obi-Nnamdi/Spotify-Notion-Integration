@@ -31,12 +31,8 @@ async function main() {
   const databasePages = getFullPages(albumDatabaseResponse);
   // Only use databse entries that have a non-empty artist value (for now)
   const validDatabasePages = databasePages.filter((page) => {
-    const artistProperty = page.properties["Artist"] ?? assert.fail();
-    assert(
-      artistProperty.type === "rich_text",
-      "Artist column name is not a rich_text type."
-    );
-    return getFullPlainText(artistProperty.rich_text) !== "";
+    const artistProperty = getRichTextField(page, "Artist");
+    return getFullPlainText(artistProperty) !== "";
   });
 
   // Get album artwork for each database
@@ -44,44 +40,23 @@ async function main() {
   // Concurrently get all artwork
   const pageArtwork = await Promise.all(
     validDatabasePages.map(async (page) => {
-      const artistProperty = page.properties["Artist"] ?? assert.fail();
-      const albumNameProperty = page.properties["Album Name"] ?? assert.fail();
-      assert(
-        artistProperty.type === "rich_text",
-        "Artist column name is not a rich_text type."
-      );
-      assert(
-        albumNameProperty.type === "title",
-        "Album Name column is not a title type."
-      );
-
-      const artistText = getFullPlainText(artistProperty.rich_text);
-      const albumText = getFullPlainText(albumNameProperty.title);
+      // Get text for artist and album name property
+      // TODO: Generalize "Artist" and "Album Name" column names
+      const artistText = getFullPlainText(getRichTextField(page, "Artist"));
+      const albumText = getFullPlainText(getTitleField(page, "Album Name"));
       return getAlbumArtwork(artistText, albumText);
     })
   );
 
   // Construct HTML output
   const HTMLOutput = validDatabasePages.reduce((prevString, page, index) => {
-    const artistProperty = page.properties["Artist"] ?? assert.fail();
-    const albumNameProperty = page.properties["Album Name"] ?? assert.fail();
-    assert(
-      artistProperty.type === "rich_text",
-      "Artist column name is not a rich_text type."
-    );
-    assert(
-      albumNameProperty.type === "title",
-      "Album Name column is not a title type."
-    );
+    const artistText = getFullPlainText(getRichTextField(page, "Artist"));
+    const albumText = getFullPlainText(getTitleField(page, "Album Name"));
     const albumArtURL: string = pageArtwork[index] ?? assert.fail();
 
     return (
       prevString +
-      `Album "${getFullPlainText(
-        albumNameProperty.title
-      )}" made by "${getFullPlainText(
-        artistProperty.rich_text
-      )}" has artwork <img src="${albumArtURL}"><br>`
+      `Album "${albumText}" made by "${artistText}" has artwork <img src="${albumArtURL}"><br>`
     );
   }, "");
 
@@ -103,6 +78,57 @@ async function main() {
       },
     });
   }));
+}
+
+/**
+ * Gets rich text field contents for `propertyName `from `page`.
+ * 
+ * @param page Page to query property from
+ * @param propertyName Property Name to Query from `page`
+ * @returns Rich Text Item array from `page`'s rich text field called `propertyName`.
+ * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a rich text field.
+ */
+function getRichTextField(page: PageObjectResponse, propertyName: string): RichTextItemResponse[] {
+  const richTextProperty = page.properties[propertyName] ?? assert.fail();
+  assert(
+    richTextProperty.type === "rich_text",
+    `Property ${propertyName} is not a rich_text type.`
+  );
+  return richTextProperty.rich_text;
+}
+
+/**
+ * Gets title contents for `propertyName `from `page`.
+ * 
+ * @param page Page to query property from
+ * @param propertyName Property Name to Query from `page`
+ * @returns Rich Text Item array from `page`'s title field called `propertyName`.
+ * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a title field.
+ */
+function getTitleField(page: PageObjectResponse, propertyName: string): RichTextItemResponse[] {
+  const titleProperty = page.properties[propertyName] ?? assert.fail();
+  assert(
+    titleProperty.type === "title",
+    `Property ${propertyName} is not title type.`
+  );
+  return titleProperty.title;
+}
+
+/**
+ * Gets number contents for `propertyName `from `page`.
+ * 
+ * @param page Page to query property from
+ * @param propertyName Property Name to Query from `page`
+ * @returns Number from `page`'s number field called `propertyName`, or null if `propertyName` is empty in `page`.
+ * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a number field.
+ */
+function getNumberField(page: PageObjectResponse, propertyName: string): number | null {
+  const numberProperty = page.properties[propertyName] ?? assert.fail();
+  assert(
+    numberProperty.type === "number",
+    `Property ${propertyName} is not title type.`
+  );
+  return numberProperty.number;
 }
 
 /**

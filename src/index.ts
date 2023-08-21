@@ -23,61 +23,101 @@ const notion = new Client({
 // TODO: Auto-Populate DB From "Saved Albums" page
 // TODO: Add feature that "repairs" messed up entries that lack an artist.
 // TODO: Auto-Populate Genres
+// TODO: Add Album IDs
 async function main() {
+  // Get all pages in Album Database
   const albumDatabaseResponse = await notion.databases.query({
     database_id: process.env.DATABASE_ID ?? assert.fail("No Database ID"),
   });
-
   const databasePages = getFullPages(albumDatabaseResponse);
-  // Only use databse entries that have a non-empty artist value (for now)
+
+  // Update existing pages with album art for their respective albums
+  // TODO: Generalize "Artist" and "Album Name" column names
+  await updatePagesWithAlbumArt(
+    databasePages,
+    "Artist",
+    "Album Name",
+    /*Overwrite Existing Artwork = */ false,
+    /*Output HTML = */ true
+  );
+}
+/**
+ * Updates databse pages in `databasePages` to have album art for each database with a non-empty artist.
+ * 
+ * @param databasePages List of Database Pages to update.
+ * @param artistColumn Name of property in `databasePages` that stores artist information. Should be a "rich text" type. 
+ * @param albumNameColumn Name of property in `databasePages` that stores album name information. Should be a "title" type.
+ * @param overwriteExistingArtwork Controls whether pages that already have both a cover and icon are potentially updated.
+ * @param outputHTML Controls whether an HTML file in 'output' directory is produced with album artwork for each database page that's updated.
+ * @throws Error if either of `artistColumn` or `albumNameColumn` are invalid property names in `databasePages`.
+ */
+async function updatePagesWithAlbumArt(
+  databasePages: PageObjectResponse[],
+  artistColumn: string,
+  albumNameColumn: string,
+  overwriteExistingArtwork: boolean = false,
+  outputHTML: boolean = false
+): Promise<void> {
+  // Only use databse entries that have a non-empty artist value, and use the user's input on including pages with existing artwork.
   const validDatabasePages = databasePages.filter((page) => {
-    const artistProperty = getRichTextField(page, "Artist");
-    return getFullPlainText(artistProperty) !== "";
+    const artistProperty = getRichTextField(page, artistColumn);
+    const filled = page.cover !== null && page.icon !== null; // does the page have a cover or icon?
+    const hasArtist = getFullPlainText(artistProperty) !== ""; // does the page have an artist?
+
+    if (filled && overwriteExistingArtwork) {
+      return hasArtist
+    } else if (!filled) {
+      return hasArtist
+    } else {
+      return false
+    }
   });
 
   // Get album artwork for each database
-
   // Concurrently get all artwork
   const pageArtwork = await Promise.all(
     validDatabasePages.map(async (page) => {
       // Get text for artist and album name property
-      // TODO: Generalize "Artist" and "Album Name" column names
-      const artistText = getFullPlainText(getRichTextField(page, "Artist"));
-      const albumText = getFullPlainText(getTitleField(page, "Album Name"));
+      const artistText = getFullPlainText(getRichTextField(page, artistColumn));
+      const albumText = getFullPlainText(getTitleField(page, albumNameColumn));
       return getAlbumArtwork(artistText, albumText);
     })
   );
 
   // Construct HTML output
-  const HTMLOutput = validDatabasePages.reduce((prevString, page, index) => {
-    const artistText = getFullPlainText(getRichTextField(page, "Artist"));
-    const albumText = getFullPlainText(getTitleField(page, "Album Name"));
-    const albumArtURL: string = pageArtwork[index] ?? assert.fail();
+  if (outputHTML) {
+    const HTMLOutput = validDatabasePages.reduce((prevString, page, index) => {
+      const artistText = getFullPlainText(getRichTextField(page, artistColumn));
+      const albumText = getFullPlainText(getTitleField(page, albumNameColumn));
+      const albumArtURL: string = pageArtwork[index] ?? assert.fail();
 
-    return (
-      prevString +
-      `Album "${albumText}" made by "${artistText}" has artwork <img src="${albumArtURL}"><br>`
-    );
-  }, "");
+      return (
+        prevString +
+        `Updated Album "${albumText}" made by "${artistText}" with artwork<br><img src="${albumArtURL}"><br>`
+      );
+    }, "");
 
-  await fs.writeFile("output/album_art_list.html", HTMLOutput);
+    await fs.writeFile("output/album_art_list.html", HTMLOutput);
+  }
 
   // Update the icon and cover of each valid page to be its album artwork
-  await Promise.all(validDatabasePages.map(async (page, index) => {
-    const albumArtURL: string = pageArtwork[index] ?? assert.fail();
-    // Update each valid page
-    return notion.pages.update({
-      page_id: page.id,
-      icon: {
-        external: { url: albumArtURL },
-        type: "external",
-      },
-      cover: {
-        external: { url: albumArtURL },
-        type: "external",
-      },
-    });
-  }));
+  await Promise.all(
+    validDatabasePages.map(async (page, index) => {
+      const albumArtURL: string = pageArtwork[index] ?? assert.fail();
+      // Update each valid page
+      return notion.pages.update({
+        page_id: page.id,
+        icon: {
+          external: { url: albumArtURL },
+          type: "external",
+        },
+        cover: {
+          external: { url: albumArtURL },
+          type: "external",
+        },
+      });
+    })
+  );
 }
 
 /**

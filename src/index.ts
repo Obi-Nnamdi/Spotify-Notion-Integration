@@ -22,7 +22,7 @@ const notion = new Client({
 // TODO: Add other features, like auto-populating artists of albums
 // TODO: Auto-Populate DB From "Saved Albums" page
 // TODO: Auto-Populate Genres
-// TODO: Add Album IDs
+// TODO: Add Album IDs and Album URL
 async function main() {
   // Get all pages in Album Database
   const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
@@ -37,6 +37,7 @@ async function main() {
   databasePages = await getAllDatabasePages(databaseID);
 
   // Update existing pages with album art for their respective albums
+  // TODO: Once Album IDs are working, stop using the album name and use the spotify API straight up
   // TODO: Generalize "Artist" and "Album Name" column names
   await updatePagesWithAlbumArt(
     databasePages,

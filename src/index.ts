@@ -5,6 +5,8 @@ import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRi
 import { SpotifyApi } from '@spotify/web-api-ts-sdk';
 import * as fs from 'node:fs/promises';
 import { type } from "os";
+import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
+import { url } from "inspector";
 
 dotenv.config();
 
@@ -23,18 +25,24 @@ const notion = new Client({
 // TODO: Auto-Populate DB From "Saved Albums" page
 // TODO: Auto-Populate Genres
 // TODO: Add Album IDs and Album URL
+// TODO: Create "main" file and choose what to run there.
 async function main() {
   // Get all pages in Album Database
   const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
   let databasePages = await getAllDatabasePages(databaseID);
   const artistColumn = "Artist";
   const albumNameColumn = "Album Name";
+  const albumIdColumn = "Album ID";
+  const albumURLColumn = "URL";
 
   // Infer artists from albums without any artists
   await inferArtistsFromAlbums(databasePages, artistColumn, albumNameColumn);
 
   // Refresh all Database Page Info Now
   databasePages = await getAllDatabasePages(databaseID);
+
+  // Update Album Ids for each entry
+  await inferAlbumIDs(databasePages, artistColumn, albumNameColumn, albumIdColumn, albumURLColumn)
 
   // Update existing pages with album art for their respective albums
   // TODO: Once Album IDs are working, stop using the album name and use the spotify API straight up
@@ -94,12 +102,12 @@ async function inferArtistsFromAlbums(
         /* Market = */ undefined,
         /* Limit = */ 1
       );
-      const artistProperty =
+      const inferredAlbum =
         spotifyResponse.albums.items[0] ??
         assert.fail("Bad Spotify API Response");
 
       // Spotify gives us a list of artists who made the album, so we join them with commas to update Notion.
-      const artistNames = artistProperty.artists.map((artist) => artist.name);
+      const artistNames = inferredAlbum.artists.map((artist) => artist.name);
       const artistText = artistNames.join(", ");
 
       if (consoleOutput) {
@@ -124,6 +132,121 @@ async function inferArtistsFromAlbums(
     })
   );
 }
+
+/**
+ * Updates Notion database pages without a filled artist_id with an inferred artist_id based on the album information.
+ * Creates a new column housing artist_id and url information for all elements without valid artist_ids.
+ * 
+ * @param databasePages List of Database Pages to update.
+ * @param artistColumn Name of property in `databasePages` that stores artist information. Should be a "rich text" type. 
+ * @param albumNameColumn Name of property in `databasePages` that stores album name information. Should be a "title" type.
+ * @param albumIdColumn Name of property in `databasePages` that stores album id information.
+ * @param albumURLColumn Name of property in `databasePages` that stores album URL information.
+ * @param consoleOutput controls whether list of inferred artist names are printed to console.
+ * @throws Error if either of `artistColumn` or `albumNameColumn` are invalid property names in `databasePages`.
+ */
+async function inferAlbumIDs(
+  databasePages: PageObjectResponse[],
+  artistColumn: string,
+  albumNameColumn: string,
+  albumIdColumn: string,
+  albumURLColumn: string,
+  consoleOutput: boolean = true
+): Promise<void> {
+  const database_properties = (await notion.databases.retrieve({
+    database_id: process.env.DATABASE_ID ?? assert.fail("No Database ID")
+  })).properties;
+
+  // Do we have an albumIdColumn? Add one to the notion database if not.
+  if (database_properties[albumIdColumn] === undefined) {
+    await notion.databases.update({
+      database_id: process.env.DATABASE_ID ?? assert.fail("No Database ID"),
+      properties: {
+        [albumIdColumn]: {
+          type: "rich_text",
+          rich_text: {}
+        }
+      }
+    })
+    if (consoleOutput) {
+      console.log("Added Album Id Column.")
+    }
+  }
+
+  //...likewise for the album URL Column.
+  if (database_properties[albumURLColumn] === undefined) {
+    await notion.databases.update({
+      database_id: process.env.DATABASE_ID ?? assert.fail("No Database ID"),
+      properties: {
+        [albumURLColumn]: {
+          type: "url",
+          url: {}
+        }
+      }
+    })
+    if (consoleOutput) {
+      console.log("Added Album Url Column.")
+    }
+  }
+
+  // Only update pages that have no album id.
+  const pagesToUpdate =
+    // If we have an album id column, only do inference on pages missing an album id 
+    database_properties[albumIdColumn] !== undefined
+      ? databasePages.filter((page) => {
+        const albumIdProperty = getRichTextField(page, albumIdColumn);
+        return getFullPlainText(albumIdProperty) === "";
+      })
+      // if we don't have an album id column, populate everything.
+      : databasePages;
+
+  // Use Spotify API to get album ID and album URL
+  await Promise.all(
+    pagesToUpdate.map(async (page) => {
+      // Search spotify for "albumName" and get its first response
+      const albumName = getFullPlainText(getTitleField(page, albumNameColumn));
+      const artistName = getFullPlainText(getRichTextField(page, artistColumn));
+      const spotifyResponse = await spotify.search(
+        `${albumName} - ${artistName}`, // Intentionally not using narrowing filters to account for human error in album documenting (i.e. if the artist/album name is misspelled)
+        ["album"],
+        /* Market = */ undefined,
+        /* Limit = */ 1
+      );
+      const inferredAlbum =
+        spotifyResponse.albums.items[0] ??
+        assert.fail("Bad Spotify API Response");
+
+      // Update Notion with the inferred album ID and URL.
+      const albumID = inferredAlbum.id;
+      const albumURL = inferredAlbum.external_urls.spotify;
+
+      if (consoleOutput) {
+        console.log(`Album "${albumName}" has id "${albumID} and URL ${albumURL}."`);
+      }
+
+      // Update Notion page with inferred artist name
+      await notion.pages.update({
+        page_id: page.id,
+        properties: {
+          // Update `artistColumn` with updated artist text
+          [albumIdColumn]: {
+            type: "rich_text",
+            rich_text: [{
+              text: {
+                content: albumID
+              }
+            }]
+          },
+          [albumURLColumn]: {
+            type: "url",
+            url: albumURL
+          },
+        }
+      });
+    })
+  );
+}
+
 
 /**
  * Updates Notion databse pages in `databasePages` to have album art for each database with a non-empty artist.

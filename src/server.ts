@@ -19,6 +19,7 @@ const app: Application = express();
 const port = process.env.PORT || 3000;
 const spotifyScopes = ["user-library-read", "user-library-modify"];
 let spotify: SpotifyApi | undefined = undefined;
+let userSavedAlbums: SavedAlbum[] = [];
 
 app.use(express.json()); // parse request bodies as JSON
 app.use(express.static('./')); // allows server to serve static content in this project
@@ -40,7 +41,7 @@ app.post('/populateToken', (req: Request, res: Response) => {
     res.status(HttpStatus.OK).type('text').send('Post Request Recieved!')
 });
 
-// GET: Gets the logged in user's saved spotify albums
+// GET: Gets the logged in user's saved spotify albums, and caches them in the server
 app.get('/userAlbums', async (req: Request, res: Response) => {
     if (spotify === undefined) {
         console.log("Redirected since access token wasn't populated!");
@@ -72,7 +73,8 @@ app.get('/userAlbums', async (req: Request, res: Response) => {
     const savedAlbums = spotifyResponses.flatMap(response => response.items);
     res.status(HttpStatus.OK).send(`User has ${totalAlbums} albums, got ${savedAlbums.length} albums from Spotify!`);
 
-    // TODO: Cache Saved Albums?
+    // Cache Saved Albums
+    userSavedAlbums = savedAlbums;
 });
 
 // GET: Retrieves the user token for the currently signed in user.
@@ -84,9 +86,10 @@ app.get('/userToken', async (req: Request, res: Response) => {
     res.send({ token: "No Token Populated!" });
 });
 
-// GET: Signs out the current user. 
-app.get('/signout', async (req: Request, res: Response) => {
-    // TODO: Implement
+// POST: Signs out the current user. 
+app.post('/signout', async (req: Request, res: Response) => {
+    spotify = undefined;
+    res.status(HttpStatus.OK).send("Successfully Logged Out!");
 });
 
 app.listen(port, () => {

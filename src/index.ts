@@ -15,7 +15,7 @@ async function authSpotify() {
 
     await SpotifyApi.performUserAuthorization(
         spotifyClientId,
-        "http://localhost:3000/userAlbums",
+        "http://localhost:3000",
         spotifyScopes,
         "/populateToken"
     );
@@ -36,5 +36,12 @@ authButton.onclick = async () => { await authSpotify(); await showToken(); };
 
 // Show the spotify access token once the page is loaded.
 window.onload = async (event) => {
+    await showToken();
+}
+
+// Send post request to "/signout" when signout button is clicked
+const signoutButton = document.getElementById("signoutButton") ?? assert.fail("Bad ID");
+signoutButton.onclick = async () => {
+    await fetch("/signout", { method: "POST" });
     await showToken();
 }

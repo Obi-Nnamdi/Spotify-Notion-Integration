@@ -114,10 +114,8 @@ async function importSavedSpotifyAlbums(
   dateDiscoveredColumn: string,
   consoleOutput: boolean = true
 ): Promise<void> {
-  console.log(`Spotify Access Token: ${await spotify.getAccessToken()}`);
-  const savedAlbumResponse = await spotify.currentUser.albums.savedAlbums();
-  console.log(savedAlbumResponse);
-  for (const { added_at, album } of savedAlbumResponse.items) {
+  for (const { added_at, album } of savedAlbums) {
+    // create new notion pages
     console.log(`Album "${album.name} was added at ${added_at}."`);
   }
 

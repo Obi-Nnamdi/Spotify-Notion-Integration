@@ -21,5 +21,20 @@ async function authSpotify() {
     );
 }
 
-const element = document.getElementById("AuthButton") ?? assert.fail("Bad ID");
-element.onclick = authSpotify;
+/**
+ * Shows spotify access token on html page.
+ */
+async function showToken() {
+    const tokenInfoElement = document.getElementById("tokenResponse") ?? assert.fail("Bad ID");
+    const tokenResponse = await fetch("/userToken");
+    const tokenJSON = await tokenResponse.json();
+    tokenInfoElement.textContent = `Token Information: ${JSON.stringify(tokenJSON, undefined, "\t")}`;
+}
+
+const authButton = document.getElementById("AuthButton") ?? assert.fail("Bad ID");
+authButton.onclick = async () => { await authSpotify(); await showToken(); };
+
+// Show the spotify access token once the page is loaded.
+window.onload = async (event) => {
+    await showToken();
+}

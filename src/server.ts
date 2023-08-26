@@ -17,7 +17,6 @@ dotenv.config();
 
 const app: Application = express();
 const port = process.env.PORT || 3000;
-const spotifyToken = null;
 const spotifyScopes = ["user-library-read", "user-library-modify"];
 let spotify: SpotifyApi | undefined = undefined;
 
@@ -51,6 +50,16 @@ app.get('/userAlbums', async (req: Request, res: Response) => {
     const limit = 50;
     const spotifyResponse = await spotify.currentUser.albums.savedAlbums(limit);
     res.status(HttpStatus.OK).send(`User has ${spotifyResponse.total} albums, got ${spotifyResponse.items.length} albums from Spotify!`);
+    // Two strategies: either sequentially query the server for each batch of 50 albums, 
+    // or query one album and hit the server multiple times concurrently for each offset
+});
+
+app.get('/userToken', async (req: Request, res: Response) => {
+    if (spotify !== undefined) {
+        res.status(HttpStatus.OK).send(await spotify.getAccessToken());
+        return;
+    }
+    res.send({ token: "No Token Populated!" });
 });
 
 // GET: Signs out the current user. 

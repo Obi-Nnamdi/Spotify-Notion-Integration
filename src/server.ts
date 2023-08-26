@@ -1,11 +1,11 @@
-import express, { Express, Request, Response, Application } from 'express';
+import express, { Express, Request, Response, Application, response } from 'express';
 import HttpStatus from 'http-status-codes';
 import path from 'path';
 import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notionhq/client";
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
-import { SpotifyApi } from '@spotify/web-api-ts-sdk';
+import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { type } from "os";
 import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
 import { url } from "inspector";
@@ -48,12 +48,34 @@ app.get('/userAlbums', async (req: Request, res: Response) => {
         return;
     }
     const limit = 50;
-    const spotifyResponse = await spotify.currentUser.albums.savedAlbums(limit);
-    res.status(HttpStatus.OK).send(`User has ${spotifyResponse.total} albums, got ${spotifyResponse.items.length} albums from Spotify!`);
-    // Two strategies: either sequentially query the server for each batch of 50 albums, 
-    // or query one album and hit the server multiple times concurrently for each offset
+
+    // Do a "diagnostic query" to find out how many albums we have, then concurrently hit the server 
+    // in blocks of 50 (our limit) until we hit the total (takes ~2 seconds)
+    const spotifyResponsePromises: Array<Promise<Page<SavedAlbum>>> = [];
+    const diagnosticQueryAlbumLimit = 0; // we don't want to get any albums here, just know how many we have
+    const diagnosticQuery = await spotify.currentUser.albums.savedAlbums(diagnosticQueryAlbumLimit);
+    const totalAlbums = diagnosticQuery.total;
+
+    // Concurrently hit spotify server for all our albums at once
+    for (let offset = 0; offset < totalAlbums; offset += limit) {
+        spotifyResponsePromises.push(
+            spotify.currentUser.albums.savedAlbums(limit, offset).then(response => {
+                console.log(`Got saved albums ${offset + 1} - ${Math.min(offset + limit, totalAlbums)}`);
+                return response
+            })
+        );
+    }
+
+    const spotifyResponses = await Promise.all(spotifyResponsePromises);
+
+    // Flatten list of spotify responses into a list of saved albums
+    const savedAlbums = spotifyResponses.flatMap(response => response.items);
+    res.status(HttpStatus.OK).send(`User has ${totalAlbums} albums, got ${savedAlbums.length} albums from Spotify!`);
+
+    // TODO: Cache Saved Albums?
 });
 
+// GET: Retrieves the user token for the currently signed in user.
 app.get('/userToken', async (req: Request, res: Response) => {
     if (spotify !== undefined) {
         res.status(HttpStatus.OK).send(await spotify.getAccessToken());
@@ -64,6 +86,7 @@ app.get('/userToken', async (req: Request, res: Response) => {
 
 // GET: Signs out the current user. 
 app.get('/signout', async (req: Request, res: Response) => {
+    // TODO: Implement
 });
 
 app.listen(port, () => {

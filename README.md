@@ -17,4 +17,8 @@ SPOTIFY_CLIENT_ID={Spotify App Client ID}
 SPOTIFY_CLIENT_SECRET={Spotify App Client Secret}
 ```
 
-Then, run `npm install` and `npm start`!
+Then, run `npm install` to install dependencies, and depending on what you want to do, execute different commands:
+
+Importing Spotify Albums: This is done via a web app, so run `npm run webpack` to bundle the ts code for running the app, run `npm run server`to start the server, and then navigate to http://localhost:3000 to start the web app.
+
+Running Misc Notion Database data importer/fixing jobs: Execute `npm run jobs`.

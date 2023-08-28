@@ -4,7 +4,7 @@ import path from 'path';
 import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notionhq/client";
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
-import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
+import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse, CreatePageParameters } from "@notionhq/client/build/src/api-endpoints";
 import { SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import * as fs from 'node:fs/promises';
 import { type } from "os";
@@ -64,16 +64,6 @@ async function main() {
     /*Overwrite Existing Artwork = */ false,
     /*Output HTML = */ true
   );
-
-  await importSavedSpotifyAlbums(
-    [],
-    databaseID,
-    albumNameColumn,
-    artistColumn,
-    albumIdColumn,
-    albumURLColumn,
-    dateDiscoveredColumn
-  );
 }
 
 /**
@@ -99,27 +89,94 @@ async function getAllDatabasePages(database_id: string): Promise<PageObjectRespo
  * @param notion_database_id Notion Database ID of database to add imported Spotify Albums to.
  * @param albumNameColumn Name of property in notion database that stores album name information. Should be a "title" type.
  * @param artistColumn Name of property in notion database that stores artist information. Should be a "rich text" type. 
- * @param albumIdColumn Name of property in notion database that stores album id information.
- * @param albumURLColumn Name of property in notion database that stores album URL information.
- * @param dateDiscoveredColumn Name of property in notion database that stores date discovered information.
- * @param consoleOutput controls whether list of inferred artist names are printed to console.
+ * @param albumIdColumn Name of property in notion database that stores album id information. Should be "rich text" type.
+ * @param albumURLColumn Name of property in notion database that stores album URL information. Should be "rich text" type.
+ * @param albumGenreColumn Name of property in notion database that stores album Genre column. Should be multi-select type.
+ * @param dateDiscoveredColumn Name of property in notion database that stores date discovered information. Should be "Date" type.
  */
-async function importSavedSpotifyAlbums(
+export async function importSavedSpotifyAlbums(
   savedAlbums: SavedAlbum[],
   notion_database_id: string,
   albumNameColumn: string,
   artistColumn: string,
   albumIdColumn: string,
   albumURLColumn: string,
+  albumGenreColumn: string,
   dateDiscoveredColumn: string,
-  consoleOutput: boolean = true
 ): Promise<void> {
-  for (const { added_at, album } of savedAlbums) {
-    // create new notion pages
-    console.log(`Album "${album.name} was added at ${added_at}."`);
-  }
+  // TODO: Use ConsoleOutput variable
+  // TODO: Allow ignoring certain columns on import, and adding columns that don't exist
+  console.log(`Running importing job on ${savedAlbums.length} albums.`);
+  // Get set of existing album IDs in our Notion Database to avoid adding duplicate albums
+  const existingDatabasePages = await getAllDatabasePages(notion_database_id);
+  const existingAlbumIDs: Set<string> = new Set(
+    existingDatabasePages.map((page) =>
+      getFullPlainText(getRichTextField(page, albumIdColumn)),
+    ),
+  );
+  const albumsToImport = savedAlbums.filter(savedAlbum => !existingAlbumIDs.has(savedAlbum.album.id));
+  console.log(`Actually Importing ${albumsToImport.length} new albums`);
 
-  // TODO: request multiple times to get all albums?
+  // Import all new spotify albums
+  const notionUpdatePromises = albumsToImport.map(async savedAlbum => {
+    const album = savedAlbum.album;
+    const artistNames = album.artists.map(artist => artist.name);
+    const artistText = artistNames.join(", ");
+    const albumURL = album.external_urls.spotify;
+    const albumGenres = album.genres;
+    // Per spotify API reference, widest album artwork is always listed first
+    const albumArtwork = album.images[0]?.url ?? assert.fail("No album artwork");
+
+    // Add album to Notion
+    const notionAPIParams: CreatePageParameters = {
+      parent: {
+        database_id: notion_database_id,
+      },
+      properties: {
+        [albumNameColumn]: {
+          title: [constructRichTextRequestField(album.name)],
+        },
+        [artistColumn]: {
+          rich_text: [constructRichTextRequestField(artistText)]
+        },
+        [albumIdColumn]: {
+          rich_text: [constructRichTextRequestField(album.id)]
+        },
+        [albumURLColumn]: {
+          url: albumURL
+        },
+        [albumGenreColumn]: {
+          multi_select: albumGenres.map(genre => ({
+            name: genre
+          }))
+        },
+        [dateDiscoveredColumn]: {
+          date: {
+            start: savedAlbum.added_at
+          }
+        }
+      },
+      // Add cover and icon
+      cover: {
+        external: {
+          url: albumArtwork
+        }
+      },
+      icon: {
+        external: {
+          url: albumArtwork
+        }
+      }
+    }
+    // add URL separately because of type checking issues
+    // notionAPIParams.properties[albumURLColumn] = { url: albumURL, name: albumURLColumn };
+    notion.pages.create(notionAPIParams);
+    console.log(`Imported album ${album.name}`);
+  });
+
+  await Promise.all(notionUpdatePromises);
+
+
   // TODO: what to do if an album already exists in the db? Thinking of just doing a filter on the list of 
   // fields and then using a map from the field to the field name to fufill API requests
 }
@@ -470,9 +527,31 @@ function getFullPlainText(richText: RichTextItemResponse[]): string {
   return richText.reduce((prevText, textItem) => prevText + textItem.plain_text, "");
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+/**
+ * Constructs a Notion RichTextRequest Field from a single string field.
+ * @param content Content to put in the rich text request field
+ * @returns the constructed richTextRequest field.
+ */
+function constructRichTextRequestField(content: string): {
+  type: "text",
+  text: {
+    content: string;
+  }
+} {
+  return {
+    type: "text",
+    text: {
+      content: content
+    }
+  }
+}
+
+if (require.main === module) {
+  console.log("Running Misc Notion Jobs:")
+  main()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+}

@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
 import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
+import { importSavedSpotifyAlbums } from './jobs';
 import { type } from "os";
 import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
 import { url } from "inspector";
@@ -61,6 +62,7 @@ app.get('/userAlbums', async (req: Request, res: Response) => {
     for (let offset = 0; offset < totalAlbums; offset += limit) {
         spotifyResponsePromises.push(
             spotify.currentUser.albums.savedAlbums(limit, offset).then(response => {
+                // Print range of albums we retrieved
                 console.log(`Got saved albums ${offset + 1} - ${Math.min(offset + limit, totalAlbums)}`);
                 return response
             })
@@ -75,6 +77,36 @@ app.get('/userAlbums', async (req: Request, res: Response) => {
 
     // Cache Saved Albums
     userSavedAlbums = savedAlbums;
+});
+
+// Imports Albums into Notion.
+app.get('/importAlbums', async (req: Request, res: Response) => {
+    // TODO: Refactor to be more general
+    if (spotify === undefined) {
+        console.log("Redirected since access token wasn't populated!");
+        res.redirect("/");
+        return;
+    }
+
+    // TODO: Automatically retrieve albums if we haven't gotten them yet
+    const notionDatabaseID = process.env.DATABASE_ID ?? assert.fail("Bad Database ID");
+    const artistColumn = "Artist";
+    const albumNameColumn = "Album Name";
+    const albumIdColumn = "Album ID";
+    const albumURLColumn = "URL";
+    const albumGenreColumn = "Genre"
+    const dateDiscoveredColumn = "Date Discovered";
+    await importSavedSpotifyAlbums(
+        userSavedAlbums,
+        notionDatabaseID,
+        albumNameColumn,
+        artistColumn,
+        albumIdColumn,
+        albumURLColumn,
+        albumGenreColumn,
+        dateDiscoveredColumn,
+    );
+    res.status(HttpStatus.OK).send(`Imported ${userSavedAlbums.length} Albums Successfully!`);
 });
 
 // GET: Retrieves the user token for the currently signed in user.

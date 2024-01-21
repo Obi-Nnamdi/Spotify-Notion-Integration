@@ -7,6 +7,7 @@ import { strict as assert } from 'assert';
 import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse, CreatePageParameters } from "@notionhq/client/build/src/api-endpoints";
 import { Album, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import * as fs from 'node:fs/promises';
+import inquirer from 'inquirer';
 import { type } from "os";
 import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
 import { url } from "inspector";
@@ -39,38 +40,166 @@ async function main() {
   // Get all pages in Album Database
   const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
   let databasePages = await getAllDatabasePages(databaseID);
-  const artistColumn = "Artist";
-  const albumNameColumn = "Album Name";
-  const albumIdColumn = "Album ID";
-  const albumURLColumn = "URL";
-  const dateDiscoveredColumn = "Date Discovered";
-  const albumRatingColumn = "Rating";
-  const albumGenreColumn = "Genre";
+  let artistColumn = "Artist";
+  let albumNameColumn = "Album Name";
+  let albumIdColumn = "Album ID";
+  let albumURLColumn = "URL";
+  let dateDiscoveredColumn = "Date Discovered";
+  let albumRatingColumn = "Rating";
+  let albumGenreColumn = "Genre";
 
-  console.log(`Running jobs on ${databasePages.length} pages.`);
-  await removeDuplicateAlbumsByAlbumProperties(databasePages, artistColumn, albumNameColumn, albumRatingColumn, /* verbose = */ true);
+  console.log(`Loaded ${databasePages.length} pages. Ready to run jobs.`);
+  console.log("Welcome to the Notion Album Database importer job dashboard.");
 
-  // TODO: Create command line app interface
 
-  // Infer artists from albums without any artists
-  await inferArtistsFromAlbums(databasePages, artistColumn, albumNameColumn);
+  // TODO: Add progress bar? Might use CLI-Progress package.
+  // TODO: Add info about what columns each job uses.
+  // TODO: Add better error handling
+  while (true) {
+    const answers = await inquirer.prompt({
+      type: "rawlist",
+      name: "job",
+      message: "What job would you like to run?",
+      choices: [
+        {
+          name: "Refresh Database Pages",
+          value: "refresh_database_pages",
+        },
+        {
+          name: "Infer Artists From Album Names",
+          value: "infer_artists"
+        },
+        {
+          name: "Infer Album IDs",
+          value: "infer_album_ids"
+        },
+        {
+          name: "Update Pages With Album Art",
+          value: "update_pages_with_album_art"
+        },
+        {
+          name: "Remove Duplicate Albums By Album Properties",
+          value: "remove_duplicate_albums_by_album_properties"
+        },
+        {
+          name: "Change Column Names used by Jobs",
+          value: "change_column_names" // TODO: create column name changing function.
+        },
+        {
+          name: "Exit",
+          value: "exit"
+        }
+      ]
+    });
+    if (answers.job === "refresh_database_pages") {
+      console.log(`Refreshing pages...`);
+      // TODO: add loading bar
+      databasePages = await getAllDatabasePages(databaseID);
+      console.log(`Loaded ${databasePages.length} pages.`);
+    }
+    else if (answers.job === "infer_artists") {
+      // Infer artists from albums without any artists.
+      console.log(`Inferring artists from albums...`);
+      await inferArtistsFromAlbums(databasePages, artistColumn, albumNameColumn);
+    }
+    else if (answers.job === "update_album_ids") {
+      // Update Album Ids for each entry
+      console.log("Inferring Album IDs...")
+      await inferAlbumIDs(databasePages, artistColumn, albumNameColumn, albumIdColumn, albumURLColumn)
+    }
+    else if (answers.job === "update_pages_with_album_art") {
+      // Update existing pages with album art for their respective albums
+      // TODO: Once Album IDs are working, stop using the album name and use the spotify API straight up
+      // TODO: Generalize "Artist" and "Album Name" column names
+      console.log("Updating pages with album art...")
+      await updatePagesWithAlbumArt(
+        databasePages,
+        artistColumn,
+        albumNameColumn,
+        /*Overwrite Existing Artwork = */ false,
+        /*Output HTML = */ true
+      );
+    }
+    else if (answers.job === "remove_duplicate_albums_by_album_properties") {
+      // Remove duplicate albums
+      console.log("Removing duplicate albums by album properties...");
+      await removeDuplicateAlbumsByAlbumProperties(databasePages, artistColumn, albumNameColumn, albumRatingColumn, /* verbose = */ true);
+    }
+    else if (answers.job === "change_column_names") {
+      // Change column names
+      // Define Map from column value names to the actual variables they define:
+      const columnNameMap: Map<string, string> = new Map([
+        ["artist", artistColumn],
+        ["album_name", albumNameColumn],
+        ["album_id", albumIdColumn],
+        ["album_url", albumURLColumn],
+        ["date_discovered", dateDiscoveredColumn],
+        ["rating", albumRatingColumn],
+        ["genre", albumGenreColumn]
+      ]);
 
-  // Refresh all Database Page Info Now
-  databasePages = await getAllDatabasePages(databaseID);
+      const columnChangeAnswer: string = (await inquirer.prompt({
+        type: "rawlist",
+        name: "column",
+        message: "Which column would you like to change?",
+        choices: [
+          {
+            name: "Artist",
+            value: "artist"
+          },
+          {
+            name: "Album Name",
+            value: "album_name"
+          },
+          {
+            name: "Album ID",
+            value: "album_id"
+          },
+          {
+            name: "Album URL",
+            value: "album_url"
+          },
+          {
+            name: "Date Discovered",
+            value: "date_discovered"
+          },
+          {
+            name: "Rating",
+            value: "rating"
+          },
+          {
+            name: "Genre",
+            value: "genre"
+          }
+        ]
+      })).column;
 
-  // Update Album Ids for each entry
-  await inferAlbumIDs(databasePages, artistColumn, albumNameColumn, albumIdColumn, albumURLColumn)
+      console.log(`Current Column Name: ${columnNameMap.get(columnChangeAnswer)}`);
+      const newColumnName: string = (await inquirer.prompt({
+        type: "input",
+        name: "new_column_name",
+        message: "What would you like to change the column name to?"
+      })).new_column_name;
+      columnNameMap.set(columnChangeAnswer, newColumnName);
 
-  // Update existing pages with album art for their respective albums
-  // TODO: Once Album IDs are working, stop using the album name and use the spotify API straight up
-  // TODO: Generalize "Artist" and "Album Name" column names
-  await updatePagesWithAlbumArt(
-    databasePages,
-    artistColumn,
-    albumNameColumn,
-    /*Overwrite Existing Artwork = */ false,
-    /*Output HTML = */ true
-  );
+      // Update All Column Names based on the columnNameMap.
+      // TODO: just use the map for changing variable names in the first place.
+      albumNameColumn = columnNameMap.get("album_name") ?? assert.fail();
+      artistColumn = columnNameMap.get("artist") ?? assert.fail();
+      albumIdColumn = columnNameMap.get("album_id") ?? assert.fail();
+      albumURLColumn = columnNameMap.get("album_url") ?? assert.fail();
+      dateDiscoveredColumn = columnNameMap.get("date_discovered") ?? assert.fail();
+      albumRatingColumn = columnNameMap.get("rating") ?? assert.fail();
+      albumGenreColumn = columnNameMap.get("genre") ?? assert.fail();
+    }
+    else if (answers.job === "exit") {
+      console.log("Exiting...");
+      break;
+    }
+    else {
+      assert.fail("Invalid job");
+    }
+  }
 }
 
 /**
@@ -500,10 +629,6 @@ async function removeDuplicateAlbumsByAlbumProperties(
   albumNameColumn: string,
   albumRatingColumn: string | undefined,
   verbose: boolean = false): Promise<string[]> {
-
-  if (verbose) {
-    console.log("Removing duplicate albums by album properties...");
-  }
   // Create map that stores key-value pairs of an album name/artist vs the notion page it belongs to.
   const albumPageMap = new Map<string, PageObjectResponse[]>();
   databasePages.forEach(page => {

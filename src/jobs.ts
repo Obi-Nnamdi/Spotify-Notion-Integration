@@ -5,7 +5,7 @@ import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notion
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse, CreatePageParameters } from "@notionhq/client/build/src/api-endpoints";
-import { SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
+import { Album, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import * as fs from 'node:fs/promises';
 import { type } from "os";
 import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
@@ -44,6 +44,13 @@ async function main() {
   const albumIdColumn = "Album ID";
   const albumURLColumn = "URL";
   const dateDiscoveredColumn = "Date Discovered";
+  const albumRatingColumn = "Rating";
+  const albumGenreColumn = "Genre";
+
+  console.log(`Running jobs on ${databasePages.length} pages.`);
+  await removeDuplicateAlbumsByAlbumProperties(databasePages, artistColumn, albumNameColumn, albumRatingColumn, /* verbose = */ true);
+
+  // TODO: Create command line app interface
 
   // Infer artists from albums without any artists
   await inferArtistsFromAlbums(databasePages, artistColumn, albumNameColumn);
@@ -73,10 +80,21 @@ async function main() {
  * @returns list of all database pages from `database_id` by querying Notion API
  */
 async function getAllDatabasePages(database_id: string): Promise<PageObjectResponse[]> {
-  const albumDatabaseResponse = await notion.databases.query({
+  // Get first batch of pages from database
+  let albumDatabaseResponse = await notion.databases.query({
     database_id: database_id,
   });
-  const databasePages = getFullPages(albumDatabaseResponse);
+  const databasePages = getFullPages(albumDatabaseResponse); // turns database query response into a list of notion pages.
+
+  // Keep asking for pages until we run out.
+  // This doesn't seem like it can be parallized unfortunately, there's no rhyme or reason to how the next_cursor position works.
+  while (albumDatabaseResponse.has_more) {
+    albumDatabaseResponse = await notion.databases.query({
+      database_id: database_id,
+      start_cursor: albumDatabaseResponse.next_cursor ?? assert.fail("Bad API response."),
+    });
+    databasePages.push(...getFullPages(albumDatabaseResponse));
+  }
   return databasePages;
 }
 
@@ -106,6 +124,7 @@ export async function importSavedSpotifyAlbums(
 ): Promise<void> {
   // TODO: Use ConsoleOutput variable
   // TODO: Allow ignoring certain columns on import, and adding columns that don't exist
+  // TODO: "Added at" data importer?
   console.log(`Running importing job on ${savedAlbums.length} albums.`);
   // Get set of existing album IDs in our Notion Database to avoid adding duplicate albums
   const existingDatabasePages = await getAllDatabasePages(notion_database_id);
@@ -114,7 +133,27 @@ export async function importSavedSpotifyAlbums(
       getFullPlainText(getRichTextField(page, albumIdColumn)),
     ),
   );
-  const albumsToImport = savedAlbums.filter(savedAlbum => !existingAlbumIDs.has(savedAlbum.album.id));
+
+  // Also have set of existing album name and artists to match
+  const existingAlbumProperties: Set<string> = new Set(
+    existingDatabasePages.map((page) =>
+      createAlbumKey(getFullPlainText(getTitleField(page, albumNameColumn)),
+        getFullPlainText(getRichTextField(page, artistColumn)))
+    ));
+
+  // Filter out the albums we import by removing any albums with album IDs we already have,
+  // or album name-artist pairs we already have.
+  // TODO: maybe make Album IDs a list and add every new album ID we find to it?
+  const albumsToImport = savedAlbums.filter(
+    (savedAlbum) =>
+      !existingAlbumIDs.has(savedAlbum.album.id) // filter out albums w/ identical ids
+      // filter out albums with identical name-artist pairs.
+      && !existingAlbumProperties.has(
+        createAlbumKey(
+          savedAlbum.album.name,
+          getArtistStringFromAlbum(savedAlbum.album)),
+      ),
+  );
   console.log(`Actually Importing ${albumsToImport.length} new albums`);
 
   // Import all new spotify albums
@@ -439,6 +478,112 @@ async function updatePagesWithAlbumArt(
 }
 
 /**
+ * Updates Notion databse pages in `databasePages` to remove duplicate albums. Duplicate albums are defined as albums with the same name 
+ * and artist text (after trimming whitespace and lowercasing all text). Note that two albums with the same name but different order of artists will
+ * be read as different albums.
+ * 
+ * Duplicates are removed via the following strategies, executed in order of ascending number:
+ * 
+ * 1. Only keep pages that have album ratings. This is done only if `albumRatingColumn` is not `undefined`.
+ * 2. Keep the page that was last modified (according to Notion).
+ * 
+ * @param databasePages List of Database Pages to update.
+ * @param artistColumn Name of property in `databasePages` that stores artist information. Should be a "rich text" type.
+ * @param albumNameColumn Name of property in `databasePages` that stores album name information. Should be a "title" type.
+ * @param albumRatingColumn Name of property in `databasePages` that stores album rating information. If not undefined, it should be a "select" type.
+ * @throws Error if any column names are invalid property names in `databasePages`.
+ * @returns Notion pageIDs of deleted pages.
+ */
+async function removeDuplicateAlbumsByAlbumProperties(
+  databasePages: PageObjectResponse[],
+  artistColumn: string,
+  albumNameColumn: string,
+  albumRatingColumn: string | undefined,
+  verbose: boolean = false): Promise<string[]> {
+
+  if (verbose) {
+    console.log("Removing duplicate albums by album properties...");
+  }
+  // Create map that stores key-value pairs of an album name/artist vs the notion page it belongs to.
+  const albumPageMap = new Map<string, PageObjectResponse[]>();
+  databasePages.forEach(page => {
+    const albumArtist = getRichTextFieldAsString(page, artistColumn);
+    const albumName = getTitleFieldAsString(page, albumNameColumn);
+    const albumKey = createAlbumKey(albumArtist, albumName);
+
+    if (albumPageMap.has(albumKey)) {
+      albumPageMap.get(albumKey)?.push(page);
+      console.log(`Found duplicate for album ${albumName} by ${albumArtist}.`); // TODO: control via "verbose" param
+    } else {
+      albumPageMap.set(albumKey, [page]);
+    }
+  });
+
+  // Focus on albums with more than one page
+  const duplicateAlbums: PageObjectResponse[][] = Array.from(albumPageMap.values()).filter(pages => pages.length > 1);
+
+  // Remove duplicate pages through several heuristics:
+  const pagesToRemove: PageObjectResponse[] = [];
+
+  // ---- Strategy 1: Only keep pages that have album ratings. Done only if we have a ratings column. ----
+
+  // We build up a list of remaining albums to filter out for duplicates after this strategy, but we reuse the old duplicate 
+  // albums list if we're not even executing this strategy in the first place.
+  const remainingAlbumPages: PageObjectResponse[][] = (albumRatingColumn !== undefined) ? [] : duplicateAlbums;
+
+  if (albumRatingColumn !== undefined) {
+    duplicateAlbums.forEach(pages => {
+      // Get lists of pages that have been given ratings, and pages that don't have ratings.
+      const ratedPages: PageObjectResponse[] = [];
+      const unratedPages: PageObjectResponse[] = [];
+      pages.forEach(page => {
+        if (getSelectFieldAsString(page, albumRatingColumn) !== undefined) {
+          ratedPages.push(page);
+        } else {
+          unratedPages.push(page);
+        }
+      });
+      // If there are pages with ratings, keep them and mark the unrated pages for deletion.
+      if (ratedPages.length > 0) {
+        remainingAlbumPages.push(ratedPages);
+        pagesToRemove.push(...unratedPages);
+      }
+      // If there are no pages with ratings, keep all pages for now (we'll try another technique to remove duplicates)
+      else {
+        remainingAlbumPages.push(pages);
+      }
+    });
+  }
+
+  // ---- Strategy 2: Keep the page that was last modified. ----
+  remainingAlbumPages.forEach(pages => {
+    // Get the last modified page
+    const lastModifiedPage = pages.reduce((prevPage, currPage) => {
+      return new Date(prevPage.last_edited_time) > new Date(currPage.last_edited_time) ? prevPage : currPage;
+    });
+    // Mark all other pages for deletion
+    pagesToRemove.push(...pages.filter(page => page.id !== lastModifiedPage.id));
+  });
+
+  if (verbose) {
+    console.log(`Removing ${pagesToRemove.length} duplicate pages.`);
+  }
+  for (const page of pagesToRemove) {
+    if (verbose) {
+      console.log(`Removing page for ${getTitleFieldAsString(page, albumNameColumn)} last edited at ${new Date(page.last_edited_time).toLocaleString()} at url "${page.url}".`); // TODO: Control via "verbose" param.
+    }
+  }
+
+  // Delete the pages we've marked for removal
+  await Promise.all(pagesToRemove.map(page => notion.pages.update({
+    page_id: page.id,
+    archived: true,
+  })));
+
+  return pagesToRemove.map(page => page.id);
+}
+
+/**
  * Gets rich text field contents for `propertyName `from `page`.
  * 
  * @param page Page to query property from
@@ -473,20 +618,67 @@ function getTitleField(page: PageObjectResponse, propertyName: string): RichText
 }
 
 /**
+ * Gets content of a rich text property from a Notion database page as a string.
+ * 
+ * @param page Page to get query `propertyName` from.
+ * @param propertyName Property name to query from `page`.
+ * @returns string representing the pure text content without any styling information from 
+ * the rich text column titled `propertyName` in `page`.
+ * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a rich text field.
+ */
+function getRichTextFieldAsString(page: PageObjectResponse, propertyName: string): string {
+  return getFullPlainText(getRichTextField(page, propertyName));
+}
+
+/**
+ * Gets content of a title property from a Notion database page as a string.
+ * 
+ * @param page Page to get query `propertyName` from.
+ * @param propertyName Property name to query from `page`.
+ * @returns string representing the pure text content from  the title column titled `propertyName` in `page`.
+ * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a title field.
+ */
+function getTitleFieldAsString(page: PageObjectResponse, propertyName: string): string {
+  return getFullPlainText(getTitleField(page, propertyName));
+}
+
+/**
  * Gets number contents for `propertyName `from `page`.
  * 
  * @param page Page to query property from
  * @param propertyName Property Name to Query from `page`
- * @returns Number from `page`'s number field called `propertyName`, or null if `propertyName` is empty in `page`.
+ * @returns Number from `page`'s number field called `propertyName`, or undefined if `propertyName` is empty in `page`.
  * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a number field.
  */
-function getNumberField(page: PageObjectResponse, propertyName: string): number | null {
+function getNumberField(page: PageObjectResponse, propertyName: string): number | undefined {
   const numberProperty = page.properties[propertyName] ?? assert.fail();
   assert(
     numberProperty.type === "number",
     `Property ${propertyName} is not title type.`
   );
-  return numberProperty.number;
+
+  return numberProperty.number ?? undefined;
+}
+
+/**
+ * Gets select field contents from `propertyName` from `page`.
+ * 
+ * @param page Page to query `propertyName` from.
+ * @param propertyName Property Name to query from `page`.
+ * @returns String representing the name of the select field in `page`'s select field called `propertyName`,
+ *  or undefined if `propertyName` is empty in `page`.
+ * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a select field. 
+ */
+function getSelectFieldAsString(page: PageObjectResponse, propertyName: string): string | undefined {
+  const selectProperty = page.properties[propertyName] ?? assert.fail();
+  assert(
+    selectProperty.type === "select",
+    `Property ${propertyName} is not select type.`
+  );
+  if (selectProperty.select === null) {
+    return undefined;
+  }
+  return selectProperty.select.name;
 }
 
 /**
@@ -544,6 +736,29 @@ function constructRichTextRequestField(content: string): {
       content: content
     }
   }
+}
+
+/**
+ * Construct a string with the artists of an album.
+ * @param album a Spotify Album object.
+ * @returns string of the artists in an album with ", " as a separator.
+ */
+function getArtistStringFromAlbum(album: Album) {
+  const artistNames = album.artists.map((artist) => artist.name);
+  return artistNames.join(", ");
+}
+
+/**
+ * Creates an album key from its artist and name properties to be used for hashing.
+ * 
+ * @param albumName Name of album.
+ * @param albumArtist Artist(s) of album.
+ * @returns String joining the trimmed and lowercased album name and artist in the format 
+ * "{albumName} - {albumArtist}".
+ */
+function createAlbumKey(albumName: string, albumArtist: string) {
+  // TODO: issue with hashing if the artists are written slightly differently between the same albums (i.e. in the wrong order).
+  return `${albumName.trim().toLowerCase()} - ${albumArtist.trim().toLowerCase()}`;
 }
 
 if (require.main === module) {

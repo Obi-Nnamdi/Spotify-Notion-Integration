@@ -8,6 +8,7 @@ import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRi
 import { Album, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import * as fs from 'node:fs/promises';
 import inquirer from 'inquirer';
+import cliProgress from 'cli-progress';
 import { type } from "os";
 import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
 import { url } from "inspector";
@@ -209,21 +210,38 @@ async function main() {
  * @returns list of all database pages from `database_id` by querying Notion API
  */
 async function getAllDatabasePages(database_id: string): Promise<PageObjectResponse[]> {
+  // Create progress bar that's continually updated as we discover we have more page sizes.
+  const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
+  const pageSize = 100; // Max Notion Page size.
+  progressBar.start(pageSize, 0);
+
   // Get first batch of pages from database
   let albumDatabaseResponse = await notion.databases.query({
     database_id: database_id,
+    page_size: pageSize,
   });
   const databasePages = getFullPages(albumDatabaseResponse); // turns database query response into a list of notion pages.
 
   // Keep asking for pages until we run out.
-  // This doesn't seem like it can be parallized unfortunately, there's no rhyme or reason to how the next_cursor position works.
+  // This doesn't seem like it can be parallized unfortunately, there's no rhyme or reason to how the next_cursor position works,
+  // and there's no easy way to count how many pages are in a database.
   while (albumDatabaseResponse.has_more) {
+    progressBar.setTotal(progressBar.getTotal() + pageSize); // Increase the progress bar's limit
+    progressBar.increment(pageSize); // Increment progress bar.
+
     albumDatabaseResponse = await notion.databases.query({
       database_id: database_id,
       start_cursor: albumDatabaseResponse.next_cursor ?? assert.fail("Bad API response."),
+      page_size: pageSize,
     });
     databasePages.push(...getFullPages(albumDatabaseResponse));
   }
+
+  // Fully complete progress bar and adjust its total (since we'll always overshoot)
+  progressBar.increment(albumDatabaseResponse.results.length);
+  progressBar.setTotal(databasePages.length);
+  progressBar.stop();
+
   return databasePages;
 }
 

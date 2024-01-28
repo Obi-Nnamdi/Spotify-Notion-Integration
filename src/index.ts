@@ -39,6 +39,15 @@ window.onload = async (event) => {
     await showToken();
 }
 
+// Load the user albums
+const loadAlbumsButton = document.getElementById("loadAlbumsButton") ?? assert.fail("Bad ID");
+loadAlbumsButton.onclick = async () => {
+    const loadAlbumResponse = fetch("/loadAlbums", { method: "POST" });
+    loadAlbumsButton.textContent = "Loading...";
+    await loadAlbumResponse;
+    loadAlbumsButton.textContent = "Load Spotify Albums";
+}
+
 // Send post request to "/signout" when signout button is clicked
 const signoutButton = document.getElementById("signoutButton") ?? assert.fail("Bad ID");
 signoutButton.onclick = async () => {

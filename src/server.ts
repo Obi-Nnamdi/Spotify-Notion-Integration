@@ -42,8 +42,8 @@ app.post('/populateToken', (req: Request, res: Response) => {
     res.status(HttpStatus.OK).type('text').send('Post Request Recieved!')
 });
 
-// GET: Gets the logged in user's saved spotify albums, and caches them in the server
-app.get('/userAlbums', async (req: Request, res: Response) => {
+// POST: Gets the logged in user's saved spotify albums, and caches them in the server
+app.post('/loadAlbums', async (req: Request, res: Response) => {
     if (spotify === undefined) {
         console.log("Redirected since access token wasn't populated!");
         res.redirect("/");
@@ -123,6 +123,8 @@ app.post('/signout', async (req: Request, res: Response) => {
     spotify = undefined;
     res.status(HttpStatus.OK).send("Successfully Logged Out!");
 });
+
+// TODO: Create Cron Job functionality (maybe separate file?)
 
 app.listen(port, () => {
     console.log(`Server is listening at http://localhost:${port}`);

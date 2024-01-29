@@ -209,11 +209,13 @@ async function main() {
  * @param database_id Notion Database ID of database to query
  * @returns list of all database pages from `database_id` by querying Notion API
  */
-async function getAllDatabasePages(database_id: string): Promise<PageObjectResponse[]> {
+async function getAllDatabasePages(database_id: string, showProgressBar: boolean = true): Promise<PageObjectResponse[]> {
   // Create progress bar that's continually updated as we discover we have more page sizes.
-  const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
   const pageSize = 100; // Max Notion Page size.
-  progressBar.start(pageSize, 0);
+  const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
+  if (showProgressBar) {
+    progressBar.start(pageSize, 0);
+  }
 
   // Get first batch of pages from database
   let albumDatabaseResponse = await notion.databases.query({
@@ -226,8 +228,10 @@ async function getAllDatabasePages(database_id: string): Promise<PageObjectRespo
   // This doesn't seem like it can be parallized unfortunately, there's no rhyme or reason to how the next_cursor position works,
   // and there's no easy way to count how many pages are in a database.
   while (albumDatabaseResponse.has_more) {
-    progressBar.setTotal(progressBar.getTotal() + pageSize); // Increase the progress bar's limit
-    progressBar.increment(pageSize); // Increment progress bar.
+    if (showProgressBar) {
+      progressBar.setTotal(progressBar.getTotal() + pageSize); // Increase the progress bar's limit
+      progressBar.increment(pageSize); // Increment progress bar.
+    }
 
     albumDatabaseResponse = await notion.databases.query({
       database_id: database_id,
@@ -238,9 +242,11 @@ async function getAllDatabasePages(database_id: string): Promise<PageObjectRespo
   }
 
   // Fully complete progress bar and adjust its total (since we'll always overshoot)
-  progressBar.increment(albumDatabaseResponse.results.length);
-  progressBar.setTotal(databasePages.length);
-  progressBar.stop();
+  if (showProgressBar) {
+    progressBar.increment(albumDatabaseResponse.results.length);
+    progressBar.setTotal(databasePages.length);
+    progressBar.stop();
+  }
 
   return databasePages;
 }
@@ -274,7 +280,7 @@ export async function importSavedSpotifyAlbums(
   // TODO: "Added at" data importer?
   console.log(`Running importing job on ${savedAlbums.length} albums.`);
   // Get set of existing album IDs in our Notion Database to avoid adding duplicate albums
-  const existingDatabasePages = await getAllDatabasePages(notion_database_id);
+  const existingDatabasePages = await getAllDatabasePages(notion_database_id, /*showProgressBar=*/ false);
   const existingAlbumIDs: Set<string> = new Set(
     existingDatabasePages.map((page) =>
       getFullPlainText(getRichTextField(page, albumIdColumn)),

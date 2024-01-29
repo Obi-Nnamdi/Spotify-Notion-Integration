@@ -120,6 +120,16 @@ importAlbumsButton.onclick = async () => {
     importAlbumsButton.textContent = "Import Albums into Notion";
 }
 
+// Buttons for starting/stopping importing Cron Job
+const importJobStartButton = document.getElementById("startImportingJob") ?? assert.fail("Bad ID");
+importJobStartButton.onclick = async () => {
+    await fetch("/startImportingJob", { method: "POST" });
+}
+const importJobStopButton = document.getElementById("stopImportingJob") ?? assert.fail("Bad ID");
+importJobStopButton.onclick = async () => {
+    await fetch("/stopImportingJob", { method: "POST" });
+}
+
 // Send post request to "/signout" when signout button is clicked
 const signoutButton = document.getElementById("signoutButton") ?? assert.fail("Bad ID");
 signoutButton.onclick = async () => {

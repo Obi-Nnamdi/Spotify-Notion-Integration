@@ -110,6 +110,16 @@ loadAlbumsButton.onclick = async () => {
     loadAlbumsButton.textContent = "Load Spotify Albums";
 }
 
+// Import the user albums
+const importAlbumsButton = document.getElementById("importAlbumsButton") ?? assert.fail("Bad ID");
+importAlbumsButton.onclick = async () => {
+    const importAlbumResponse = fetch("/importAlbums", { method: "POST" });
+    importAlbumsButton.textContent = "Importing...";
+    await importAlbumResponse;
+    await updatePage();
+    importAlbumsButton.textContent = "Import Albums into Notion";
+}
+
 // Send post request to "/signout" when signout button is clicked
 const signoutButton = document.getElementById("signoutButton") ?? assert.fail("Bad ID");
 signoutButton.onclick = async () => {

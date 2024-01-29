@@ -75,8 +75,8 @@ app.post('/loadAlbums', async (req: Request, res: Response) => {
     userSavedAlbums = savedAlbums;
 });
 
-// Imports Albums into Notion.
-app.get('/importAlbums', async (req: Request, res: Response) => {
+// POST: Imports Albums into Notion.
+app.post('/importAlbums', async (req: Request, res: Response) => {
     // TODO: Refactor to be more general
     if (spotify === undefined) {
         console.log("Redirected since access token wasn't populated!");

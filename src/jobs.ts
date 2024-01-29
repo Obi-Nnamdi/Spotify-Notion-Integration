@@ -361,10 +361,6 @@ export async function importSavedSpotifyAlbums(
   });
 
   await Promise.all(notionUpdatePromises);
-
-
-  // TODO: what to do if an album already exists in the db? Thinking of just doing a filter on the list of 
-  // fields and then using a map from the field to the field name to fufill API requests
 }
 
 /**

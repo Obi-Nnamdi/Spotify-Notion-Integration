@@ -1,6 +1,6 @@
 # Spotify-Notion Album Database App
 
-#### **[Features](#features) • [Getting Started](#getting-started)**
+#### **[Features](#features) • [Getting Started](#getting-started) • [Importing Spotify Albums into Notion](#importing-spotify-albums-into-notion) • [Running Notion Album Database jobs](#running-notion-album-database-jobs)**
 
 This project links your Spotify album library to a Notion database, and allows you to perform some operations on any album database you may have in Notion.
 
@@ -42,6 +42,15 @@ SPOTIFY_CLIENT_SECRET={Spotify App Client Secret}
 
 Then, run `npm install` to install dependencies, and depending on what you want to do, execute different commands:
 
-**Importing Spotify Albums**: This is done via a web app, so run `npm run webpack` to bundle the ts code for running the app, run `npm run server` to start the server, and then navigate to http://localhost:3000 to start the web app.
+### Importing Spotify Albums into Notion
+This is done via a web app, so run `npm run webpack` to bundle the ts code for running the app, run `npm run server` to start the server, and then navigate to http://localhost:3000 to start the web app.
 
-**Running Notion Album Database database jobs**: Execute `npm run jobs`.
+When using the web app, first click the "Sign in with Spotify" button to get a Spotify API token. You'll then see the populated token in the web app. 
+
+From there, click the "Load Spotify Albums" button to load the saved albums from your Spotify library into the app.
+
+After loading the albums, you can execute the "Import Albums into Notion" button to import the loaded albums into your Notion database or click the "Sign Out" button to sign out of the app.
+
+
+### Running Notion Album Database jobs
+Execute `npm run jobs`. You can then select and run the desired job from the command line interface.

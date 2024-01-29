@@ -1,15 +1,11 @@
 import express, { Express, Request, Response, Application, response } from 'express';
 import HttpStatus from 'http-status-codes';
 import path from 'path';
-import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notionhq/client";
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
-import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
 import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { importSavedSpotifyAlbums } from './jobs';
-import { type } from "os";
-import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
-import { url } from "inspector";
+import { SpotifyAlbum } from './defs';
 
 // For env File
 dotenv.config();
@@ -117,6 +113,20 @@ app.get('/userToken', async (req: Request, res: Response) => {
     }
     res.send({ token: "No Token Populated!" });
 });
+
+// GET: Retrieves the user's saved albums.
+app.get('/userAlbums', async (req: Request, res: Response) => {
+    res.send(userSavedAlbums.map(savedAlbum => {
+        const album: SpotifyAlbum = {
+            name: savedAlbum.album.name,
+            artists: savedAlbum.album.artists.map(artist => artist.name),
+            cover_url: savedAlbum.album.images[0]?.url || "",
+            url: savedAlbum.album.external_urls.spotify
+        }
+        return album;
+    }
+    ))
+})
 
 // POST: Signs out the current user. 
 app.post('/signout', async (req: Request, res: Response) => {

@@ -39,15 +39,64 @@ async function showAlbums() {
     const albumsElement = document.getElementById("loadedAlbums") ?? assert.fail("Bad ID");
     const albumsResponse = await fetch("/userAlbums");
     const savedAlbums: SpotifyAlbum[] = await albumsResponse.json();
-    console.log(savedAlbums);
-    albumsElement.textContent = `Loaded Albums: ${JSON.stringify(savedAlbums, undefined, "\t")}`;
+    // Clear album element children
+    while (albumsElement.firstChild) {
+        albumsElement.removeChild(albumsElement.firstChild);
+    }
+    if (savedAlbums.length === 0) {
+        const noAlbumsElement = document.createElement("p");
+        noAlbumsElement.textContent = "No albums found.";
+        albumsElement.appendChild(noAlbumsElement);
+        return;
+    }
+
+    // Create table from saved Spotify Albums:
+    const table = document.createElement("table");
+    table.classList.add("album-table");
+    // Build table header
+    const headerRow = document.createElement("tr");
+    const albumNameHeader = document.createElement("th");
+    albumNameHeader.textContent = "Album Name";
+    const albumArtistHeader = document.createElement("th");
+    albumArtistHeader.textContent = "Artist";
+    const albumCoverHeader = document.createElement("th");
+    albumCoverHeader.textContent = "Album Cover";
+    headerRow.appendChild(albumNameHeader);
+    headerRow.appendChild(albumArtistHeader);
+    headerRow.appendChild(albumCoverHeader);
+    table.appendChild(headerRow);
+
+    // Build table rows
+    for (const album of savedAlbums) {
+        const row = document.createElement("tr");
+        const albumNameCell = document.createElement("td");
+        albumNameCell.innerHTML = `<a target="_blank" href="${album.url}">${album.name}</a>`;
+        const albumArtistCell = document.createElement("td");
+        albumArtistCell.textContent = album.artists.join(", ");
+        const albumCoverCell = document.createElement("td");
+        const image = document.createElement("img");
+        image.src = album.cover_url;
+        albumCoverCell.appendChild(image);
+        row.appendChild(albumNameCell);
+        row.appendChild(albumArtistCell);
+        row.appendChild(albumCoverCell);
+        table.appendChild(row);
+    }
+    albumsElement.appendChild(table);
 }
 
 const authButton = document.getElementById("AuthButton") ?? assert.fail("Bad ID");
 authButton.onclick = async () => { await authSpotify(); await showToken(); };
 
-// Show the spotify access token once the page is loaded.
+// Show the spotify access token and user's saved albums once the page is loaded.
 window.onload = async (event) => {
+    await updatePage();
+}
+
+/**
+ * Updates the dynamic components of the webpage.
+ */
+async function updatePage() {
     await Promise.all([showToken(), showAlbums()]);
 }
 
@@ -65,5 +114,5 @@ loadAlbumsButton.onclick = async () => {
 const signoutButton = document.getElementById("signoutButton") ?? assert.fail("Bad ID");
 signoutButton.onclick = async () => {
     await fetch("/signout", { method: "POST" });
-    await showToken();
+    await updatePage();
 }

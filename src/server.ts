@@ -131,6 +131,8 @@ app.get('/userAlbums', async (req: Request, res: Response) => {
 // POST: Signs out the current user. 
 app.post('/signout', async (req: Request, res: Response) => {
     spotify = undefined;
+    userSavedAlbums = [];
+    console.log("Logged Out!");
     res.status(HttpStatus.OK).send("Successfully Logged Out!");
 });
 

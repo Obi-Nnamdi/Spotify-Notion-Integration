@@ -11,12 +11,17 @@ const spotifyScopes = ["user-library-read", "user-library-modify"];
 
 /**
  * Performs server authentication to get Spotify Token, redirecting back to /populateToken.
+ * 
+ * Note that this function will fail if not started from a page hosted on an HTTPS server (excluding localhost),
+ * since the Web Crypto API is restricted to secure origins.
+ * @see https://stackoverflow.com/a/57170494/20791863
  */
 async function authSpotify() {
 
+    // TODO: experiment with being redirected to another callback URL that calls performUserAuthorization again to avoid having to click authorize twice
     await SpotifyApi.performUserAuthorization(
         spotifyClientId,
-        "http://localhost:3000",
+        window.location.origin, // redirect back to the page we started on
         spotifyScopes,
         "/populateToken"
     );

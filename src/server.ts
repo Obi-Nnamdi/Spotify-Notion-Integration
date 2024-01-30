@@ -9,7 +9,12 @@ import { SpotifyAlbum } from './defs';
 import { CronJob } from 'cron';
 import { standardFormatDate } from './helpers';
 import cliProgress from 'cli-progress';
-import { DateTime } from 'luxon';
+import { DateTime } from 'luxon';;
+import * as fs from 'node:fs';
+import https from 'node:https';
+
+
+
 
 // Using Chalk v4.1.2 on purpose: it's the only one that works with CommonJS.
 import chalk from 'chalk';
@@ -73,6 +78,7 @@ app.get('/', (req: Request, res: Response) => {
 // Spotify's authentication servers.
 // Populates the spotifyApi variable, allowing calls to get user information to be possible.
 app.post('/populateToken', (req: Request, res: Response) => {
+    console.log(req.body);
     spotify = SpotifyApi.withAccessToken(
         process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID"),
         req.body
@@ -163,9 +169,24 @@ app.post('/stopImportingJob', (req: Request, res: Response) => {
     res.status(HttpStatus.OK);
 });
 
-app.listen(port, () => {
-    console.log(`Server is listening at http://localhost:${port}`);
-});
+// Try and start an https server using secure credentials if we have them
+try {
+    const certOptions = {
+        key: fs.readFileSync(path.resolve("./cert/key.pem")),
+        cert: fs.readFileSync(path.resolve("./cert/cert.pem")),
+        passphrase: process.env.CERT_PASSPHRASE ?? assert.fail("No Cert Passphrase")
+    };
+    https.createServer(certOptions, app).listen(port, () => {
+        console.log(`Server is listening at https://localhost:${port}`);
+    });
+}
+catch (Error) {
+    // Start an http server if we can't start an https server
+    console.log("Unable to start https server, moving to http server...");
+    app.listen(port, () => {
+        console.log(`Server is listening at http://localhost:${port}`);
+    });
+}
 
 async function runImportingJob() {
     console.log(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Importing Job...")}`);

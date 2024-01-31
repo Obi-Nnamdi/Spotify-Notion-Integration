@@ -12,6 +12,7 @@ import cliProgress from 'cli-progress';
 import { type } from "os";
 import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
 import { url } from "inspector";
+import { Logger } from 'winston';
 
 // For env File
 dotenv.config();
@@ -261,6 +262,7 @@ async function getAllDatabasePages(database_id: string, showProgressBar: boolean
  * @param albumURLColumn Name of property in notion database that stores album URL information. Should be "rich text" type.
  * @param albumGenreColumn Name of property in notion database that stores album Genre column. Should be multi-select type.
  * @param dateDiscoveredColumn Name of property in notion database that stores date discovered information. Should be "Date" type.
+ * @param logger Logger to use to print information about the importing process. If not specified, console.log is used.
  */
 export async function importSavedSpotifyAlbums(
   savedAlbums: SavedAlbum[],
@@ -271,11 +273,13 @@ export async function importSavedSpotifyAlbums(
   albumURLColumn: string,
   albumGenreColumn: string,
   dateDiscoveredColumn: string,
+  logger?: Logger | undefined
 ): Promise<void> {
+  const loggingFunc = logger?.verbose ?? console.log;
   // TODO: Use ConsoleOutput variable
   // TODO: Allow ignoring certain columns on import, and adding columns that don't exist
   // TODO: "Added at" data importer?
-  console.log(`Running importing job on ${savedAlbums.length} albums.`);
+  loggingFunc(`Running importing job on ${savedAlbums.length} albums.`);
   // Get set of existing album IDs in our Notion Database to avoid adding duplicate albums
   const existingDatabasePages = await getAllDatabasePages(notion_database_id, /*showProgressBar=*/ false);
   const existingAlbumIDs: Set<string> = new Set(
@@ -304,7 +308,7 @@ export async function importSavedSpotifyAlbums(
           getArtistStringFromAlbum(savedAlbum.album)),
       ),
   );
-  console.log(`Actually Importing ${albumsToImport.length} new albums`);
+  loggingFunc(`Actually Importing ${albumsToImport.length} new albums.`);
 
   // Import all new spotify albums
   const notionUpdatePromises = albumsToImport.map(async savedAlbum => {
@@ -363,7 +367,7 @@ export async function importSavedSpotifyAlbums(
     // add URL separately because of type checking issues
     // notionAPIParams.properties[albumURLColumn] = { url: albumURL, name: albumURLColumn };
     notion.pages.create(notionAPIParams);
-    console.log(`Imported album ${album.name}`);
+    loggingFunc(`Imported album "${album.name}".`);
   });
 
   await Promise.all(notionUpdatePromises);

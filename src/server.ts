@@ -1,4 +1,5 @@
 import express, { Express, Request, Response, Application, response, NextFunction } from 'express';
+import expressAsyncHandler from 'express-async-handler';
 import HttpStatus from 'http-status-codes';
 import path from 'path';
 import dotenv from "dotenv";
@@ -15,7 +16,6 @@ import https from 'node:https';
 import { Logtail } from '@logtail/node';
 import { LogtailTransport } from '@logtail/winston';
 import winston from 'winston';
-
 // Using Chalk v4.1.2 on purpose: it's the only one that works with CommonJS.
 import chalk from 'chalk';
 
@@ -105,7 +105,7 @@ app.get('/', (req: Request, res: Response) => {
 // Spotify's authentication servers.
 // Populates the spotifyApi variable, allowing calls to get user information to be possible.
 app.post('/populateToken', (req: Request, res: Response) => {
-    logger.verbose(req.body);
+    logger.verbose(JSON.stringify(req.body));
     spotify = SpotifyApi.withAccessToken(
         process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID"),
         req.body
@@ -114,7 +114,7 @@ app.post('/populateToken', (req: Request, res: Response) => {
 });
 
 // POST: Gets the logged in user's saved spotify albums, and caches them in the server
-app.post('/loadAlbums', async (req: Request, res: Response) => {
+app.post('/loadAlbums', expressAsyncHandler(async (req: Request, res: Response) => {
     if (spotify === undefined) {
         logger.error("ERROR: Internal spotify access token wasn't populated!");
         res.status(HttpStatus.INTERNAL_SERVER_ERROR).send("Internal Server Error: Spotify Access Token Not Populated");
@@ -126,10 +126,10 @@ app.post('/loadAlbums', async (req: Request, res: Response) => {
 
     // Cache Saved Albums
     localSavedAlbums = savedAlbums;
-});
+}));
 
 // POST: Imports Albums into Notion.
-app.post('/importAlbums', async (req: Request, res: Response) => {
+app.post('/importAlbums', expressAsyncHandler(async (req: Request, res: Response) => {
     // TODO: Refactor to be more general
     if (spotify === undefined) {
         logger.error("ERROR: Internal spotify access token wasn't populated!");
@@ -147,9 +147,10 @@ app.post('/importAlbums', async (req: Request, res: Response) => {
         albumURLColumn,
         albumGenreColumn,
         dateDiscoveredColumn,
+        /* logger = */ logger
     );
     res.status(HttpStatus.OK).send(`Imported ${localSavedAlbums.length} Albums Successfully!`);
-});
+}));
 
 // GET: Retrieves the user token for the currently signed in user.
 app.get('/userToken', async (req: Request, res: Response) => {
@@ -161,7 +162,7 @@ app.get('/userToken', async (req: Request, res: Response) => {
 });
 
 // GET: Retrieves the user's saved albums.
-app.get('/userAlbums', async (req: Request, res: Response) => {
+app.get('/userAlbums', (req: Request, res: Response) => {
     res.send(localSavedAlbums.map(savedAlbum => {
         const album: SpotifyAlbum = {
             name: savedAlbum.album.name,
@@ -175,7 +176,7 @@ app.get('/userAlbums', async (req: Request, res: Response) => {
 })
 
 // POST: Signs out the current user. 
-app.post('/signout', async (req: Request, res: Response) => {
+app.post('/signout', (req: Request, res: Response) => {
     spotify = undefined;
     localSavedAlbums = [];
     logger.info("Logged Out!");
@@ -237,6 +238,7 @@ async function runImportingJob() {
             albumURLColumn,
             albumGenreColumn,
             dateDiscoveredColumn,
+            /* logger = */ logger
         );
     }
     catch (error) {

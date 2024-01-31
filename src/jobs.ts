@@ -31,10 +31,7 @@ const notion = new Client({
 });
 
 // TODO: Abstract out into other files
-// TODO: Add other features, like auto-populating artists of albums
-// TODO: Auto-Populate DB From "Saved Albums" page
 // TODO: Auto-Populate Genres
-// TODO: Add Album IDs and Album URL
 // TODO: Create "main" file and choose what to run there.
 // TODO: Auto-remove albums with ratings of < 2.
 async function main() {
@@ -315,6 +312,9 @@ export async function importSavedSpotifyAlbums(
     const artistNames = album.artists.map(artist => artist.name);
     const artistText = artistNames.join(", ");
     const albumURL = album.external_urls.spotify;
+    // TODO: change the way album genres are retrieved by instead using the artist's genre (maybe have some sort of switch/paramater for this)
+    // This is because right now (Winter 2024), album genres aren't really populated at all, with most of the genre information coming from the artist
+    // See https://community.spotify.com/t5/Spotify-for-Developers/Getting-album-not-getting-genre/td-p/5093156
     const albumGenres = album.genres;
     // Per spotify API reference, widest album artwork is always listed first
     const albumArtwork = album.images[0]?.url ?? assert.fail("No album artwork");

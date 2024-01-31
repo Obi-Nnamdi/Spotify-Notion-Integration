@@ -51,6 +51,8 @@ SPOTIFY_CLIENT_ID={Spotify App Client ID}
 SPOTIFY_CLIENT_SECRET={Spotify App Client Secret}
 ```
 
+<!-- TODO: Explain how to get each .env file property -->
+
 Then, run `npm install` to install dependencies, and depending on what you want to do, execute different commands:
 
 
@@ -112,3 +114,5 @@ When using the web app, first click the "Sign in with Spotify" button to get a S
 From there, click the "Load Spotify Albums" button to load the saved albums from your Spotify library into the app.
 
 After loading the albums, you can click the "Import Albums into Notion" button to import the loaded albums into your Notion database or click the "Sign Out" button to sign out of the app.
+
+<!-- TODO: Add "logging" section -->

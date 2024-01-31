@@ -12,9 +12,9 @@ import cliProgress from 'cli-progress';
 import { DateTime } from 'luxon';;
 import * as fs from 'node:fs';
 import https from 'node:https';
-
-
-
+import { Logtail } from '@logtail/node';
+import { LogtailTransport } from '@logtail/winston';
+import winston from 'winston';
 
 // Using Chalk v4.1.2 on purpose: it's the only one that works with CommonJS.
 import chalk from 'chalk';
@@ -23,11 +23,37 @@ import chalk from 'chalk';
 dotenv.config();
 
 // Globals (I know, I know...)
-const app: Application = express();
-const port = process.env.PORT || 3000;
 const spotifyScopes = ["user-library-read", "user-library-modify"];
 let spotify: SpotifyApi | undefined = undefined;
 let localSavedAlbums: SavedAlbum[] = [];
+
+// Logging Globals
+const loggingTransports: winston.transport[] = [
+    new winston.transports.File({ filename: path.resolve('logs/error.log'), level: 'error' }),
+    new winston.transports.File({ filename: path.resolve('logs/combined.log') }),
+    new winston.transports.Console({
+        format: winston.format.combine(
+            winston.format.colorize(),
+            winston.format.simple()
+        )
+    }),
+];
+
+// If we have a Logtail Source Token, add it as another logging transport
+if (process.env.LOGTAIL_SOURCE_TOKEN !== undefined) {
+    console.log("Sending logs using Logtail...");
+    const logtail = new Logtail(process.env.LOGTAIL_SOURCE_TOKEN);
+    loggingTransports.push(new LogtailTransport(logtail));
+}
+const logger = winston.createLogger({
+    level: process.env.LOG_LEVEL || 'info',
+    format: winston.format.combine(winston.format.errors({ stack: true }), winston.format.timestamp(), winston.format.json()),
+    transports: loggingTransports
+})
+
+// Server Globals
+const app: Application = express();
+const port = process.env.PORT || 3000;
 const importingJob = new CronJob(
     "0-59/15 * * * *", // Every 15 minutes
     // "* * * * * *", // Every second
@@ -64,7 +90,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
         endpointStringColor = chalk.blue;
     }
     const endpointString = endpointStringColor(`${req.method.toUpperCase()}: ${req.path}`);
-    console.log(`${dateString} ${endpointString}`)
+    // console.log(`${dateString} ${endpointString}`);
+    logger.info(`${dateString} ${endpointString}`);
     next();
 })
 
@@ -78,7 +105,7 @@ app.get('/', (req: Request, res: Response) => {
 // Spotify's authentication servers.
 // Populates the spotifyApi variable, allowing calls to get user information to be possible.
 app.post('/populateToken', (req: Request, res: Response) => {
-    console.log(req.body);
+    logger.verbose(req.body);
     spotify = SpotifyApi.withAccessToken(
         process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID"),
         req.body
@@ -89,12 +116,12 @@ app.post('/populateToken', (req: Request, res: Response) => {
 // POST: Gets the logged in user's saved spotify albums, and caches them in the server
 app.post('/loadAlbums', async (req: Request, res: Response) => {
     if (spotify === undefined) {
-        console.error("ERROR: Internal spotify access token wasn't populated!");
+        logger.error("ERROR: Internal spotify access token wasn't populated!");
         res.status(HttpStatus.INTERNAL_SERVER_ERROR).send("Internal Server Error: Spotify Access Token Not Populated");
         return;
     }
     const savedAlbums = await getSavedUserAlbums();
-    console.log(`Loaded ${savedAlbums.length} albums from Spotify!`);
+    logger.info(`Loaded ${savedAlbums.length} albums from Spotify!`);
     res.status(HttpStatus.OK).send(`Loaded ${savedAlbums.length} albums from Spotify!`);
 
     // Cache Saved Albums
@@ -105,7 +132,7 @@ app.post('/loadAlbums', async (req: Request, res: Response) => {
 app.post('/importAlbums', async (req: Request, res: Response) => {
     // TODO: Refactor to be more general
     if (spotify === undefined) {
-        console.error("ERROR: Internal spotify access token wasn't populated!");
+        logger.error("ERROR: Internal spotify access token wasn't populated!");
         res.status(HttpStatus.INTERNAL_SERVER_ERROR).send("Internal Server Error: Spotify Access Token Not Populated");
         return;
     }
@@ -151,21 +178,21 @@ app.get('/userAlbums', async (req: Request, res: Response) => {
 app.post('/signout', async (req: Request, res: Response) => {
     spotify = undefined;
     localSavedAlbums = [];
-    console.log("Logged Out!");
+    logger.info("Logged Out!");
     res.status(HttpStatus.OK).send("Successfully Logged Out!");
 });
 
 // POST: Starts cron job for automatically importing spotify albums
 app.post('/startImportingJob', (req: Request, res: Response) => {
     importingJob.start();
-    console.log(`Importing Cron Job Started! It will next run at ${standardFormatDate(importingJob.nextDate())}`);
+    logger.info(`Importing Cron Job Started! It will next run at ${standardFormatDate(importingJob.nextDate())}`);
     res.status(HttpStatus.OK);
 });
 
 // POST: Ends cron job for automatically importing spotify albums
 app.post('/stopImportingJob', (req: Request, res: Response) => {
     importingJob.stop();
-    console.log("Importing Cron Job Stopped!");
+    logger.info("Importing Cron Job Stopped!");
     res.status(HttpStatus.OK);
 });
 
@@ -177,40 +204,46 @@ try {
         passphrase: process.env.CERT_PASSPHRASE ?? assert.fail("No Cert Passphrase")
     };
     https.createServer(certOptions, app).listen(port, () => {
-        console.log(`Server is listening at https://localhost:${port}`);
+        logger.info(`Server is listening at https://localhost:${port}`);
     });
 }
 catch (Error) {
     // Start an http server if we can't start an https server
-    console.log("Unable to start https server, moving to http server...");
+    logger.info("Unable to start https server, moving to http server...");
     app.listen(port, () => {
-        console.log(`Server is listening at http://localhost:${port}`);
+        logger.info(`Server is listening at http://localhost:${port}`);
     });
 }
 
 async function runImportingJob() {
-    console.log(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Importing Job...")}`);
+    logger.info(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Importing Job...")}`);
     if (spotify === undefined) {
-        console.log("Skipping Importing Job because internal Spotify Access Token is not populated.");
+        logger.warn("Skipping Importing Job because internal Spotify Access Token is not populated.");
         return;
     }
-    // Load and import saved spotify albums
-    console.log("Importing Loaded Albums from Spotify...");
-    // Note that we don't update our cache of userSavedAlbums here, 
-    // this process runs separately in the background
-    const localSavedAlbums = await getSavedUserAlbums();
-    console.log("Importing Loaded Albums into Notion...");
-    await importSavedSpotifyAlbums(
-        localSavedAlbums,
-        notionDatabaseID,
-        albumNameColumn,
-        artistColumn,
-        albumIdColumn,
-        albumURLColumn,
-        albumGenreColumn,
-        dateDiscoveredColumn,
-    );
-    console.log(`Done! Importing Job will next run at ${standardFormatDate(importingJob.nextDate())}`);
+    try {
+        // Load and import saved spotify albums
+        logger.info("Importing Loaded Albums from Spotify...");
+        // Note that we don't update our cache of userSavedAlbums here, 
+        // this process runs separately in the background
+        const localSavedAlbums = await getSavedUserAlbums();
+        logger.info("Importing Loaded Albums into Notion...");
+        await importSavedSpotifyAlbums(
+            localSavedAlbums,
+            notionDatabaseID,
+            albumNameColumn,
+            artistColumn,
+            albumIdColumn,
+            albumURLColumn,
+            albumGenreColumn,
+            dateDiscoveredColumn,
+        );
+    }
+    catch (error) {
+        logger.error("Error occurred while running importing job!");
+        logger.error(error);
+    }
+    logger.info(`Done! Importing Job will next run at ${standardFormatDate(importingJob.nextDate())}`);
 }
 
 /**

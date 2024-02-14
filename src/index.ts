@@ -1,12 +1,11 @@
 import path from 'path';
 import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notionhq/client";
-import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
 import { SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { SpotifyAlbum } from './defs';
 
-const spotifyClientId = "b817fc0a9ff6449aa771389ac2614b49";
+const spotifyClientId = process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID in env file.");
 const spotifyScopes = ["user-library-read", "user-library-modify"];
 
 /**

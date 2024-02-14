@@ -2,6 +2,11 @@
 
 const path = require('path');
 const NodePolyfillPlugin = require('node-polyfill-webpack-plugin');
+const { webpack, DefinePlugin } = require("webpack");
+
+// Include dotenv file in webpack bundle
+const dotenv = require("dotenv");
+dotenv.config();
 
 module.exports = {
   entry: "./src/index.ts",
@@ -36,5 +41,11 @@ module.exports = {
     filename: "bundle.js",
     path: path.resolve(__dirname, "dist"),
   },
-  plugins: [new NodePolyfillPlugin()],
+  plugins: [
+    new NodePolyfillPlugin(),
+    new DefinePlugin({
+      "process.env":
+        JSON.stringify(dotenv.config().parsed) ?? assert.fail("Bad .env file"),
+    }),
+  ],
 };

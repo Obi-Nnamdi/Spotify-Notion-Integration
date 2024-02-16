@@ -54,7 +54,6 @@ async function main() {
   console.log("Welcome to the Notion Album Database importer job dashboard.");
 
 
-  // TODO: Add progress bar? Might use CLI-Progress package.
   // TODO: Add info about what columns each job uses.
   // TODO: Add better error handling
   while (true) {
@@ -85,7 +84,7 @@ async function main() {
         },
         {
           name: "Change Column Names used by Jobs",
-          value: "change_column_names" // TODO: create column name changing function.
+          value: "change_column_names"
         },
         {
           name: "Exit",
@@ -95,7 +94,6 @@ async function main() {
     });
     if (answers.job === "refresh_database_pages") {
       console.log(`Refreshing pages...`);
-      // TODO: add loading bar
       databasePages = await getAllDatabasePages(databaseID);
       console.log(`Loaded ${databasePages.length} pages.`);
     }
@@ -279,9 +277,7 @@ export async function importSavedSpotifyAlbums(
   logger?: Logger | undefined
 ): Promise<void> {
   const loggingFunc = logger?.verbose ?? console.log;
-  // TODO: Use ConsoleOutput variable
   // TODO: Allow ignoring certain columns on import, and adding columns that don't exist
-  // TODO: "Added at" data importer?
   loggingFunc(`Running importing job on ${savedAlbums.length} albums.`);
   // Get set of existing album IDs in our Notion Database to avoid adding duplicate albums
   const existingDatabasePages = await getAllDatabasePages(notion_database_id, /*showProgressBar=*/ false);
@@ -300,7 +296,6 @@ export async function importSavedSpotifyAlbums(
 
   // Filter out the albums we import by removing any albums with album IDs we already have,
   // or album name-artist pairs we already have.
-  // TODO: maybe make Album IDs a list and add every new album ID we find to it?
   const albumsToImport = savedAlbums.filter(
     (savedAlbum) =>
       !existingAlbumIDs.has(savedAlbum.album.id) // filter out albums w/ identical ids
@@ -418,7 +413,6 @@ export async function updateStaleNotionAlbumsFromSpotify(
     );
     if (existingAlbumProperties.has(albumKey)) {
       // Warn users about duplicate albums in their spotify DB, adding an extra message if they're planning to overrite IDs
-      // TODO: I don't know if the warning string actually makes sense even 
       const warningString = `Duplicate albums found in saved spotify albums for key "${albumKey}".${overwriteIDs ? "The first album will be used for an ID overrite." : ""}
       Album ID of the first album is ${existingAlbumProperties.get(albumKey)![0]?.album.id}.
       Album ID of the second album is ${album.album.id}.`;
@@ -453,7 +447,7 @@ export async function updateStaleNotionAlbumsFromSpotify(
     const albumName = getTitleFieldAsString(page, albumNameColumn);
     const artistName = getRichTextFieldAsString(page, artistColumn);
     const albumIDs = getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn);
-    const albumURL = getURLFieldAsString(page, albumURLColumn); // TODO: make function
+    const albumURL = getURLFieldAsString(page, albumURLColumn);
     const correspondingSpotifyAlbums = existingAlbumProperties.get(createAlbumKey(albumName, artistName));
 
     // Don't handle pages that have no "ground truth" saved spotify albums.
@@ -543,7 +537,7 @@ export async function updateStaleNotionAlbumsFromSpotify(
     if (oldAlbumURL !== newAlbumURL) {
       loggingString += `\nAlbum URL: "${oldAlbumURL}" --> ${textHighlight(newAlbumURL)}`;
     }
-    loggingFunc(loggingString); // TODO: get this working
+    loggingFunc(loggingString);
   }))
   loggingFunc("Finished updating stale albums.");
 
@@ -837,7 +831,7 @@ async function removeDuplicateAlbumsByAlbumProperties(
 
     if (albumPageMap.has(albumKey)) {
       albumPageMap.get(albumKey)?.push(page);
-      console.log(`Found duplicate for album ${albumName} by ${albumArtist}.`); // TODO: control via "verbose" param
+      console.log(`Found duplicate for album ${albumName} by ${albumArtist}.`);
     } else {
       albumPageMap.set(albumKey, [page]);
     }
@@ -894,7 +888,7 @@ async function removeDuplicateAlbumsByAlbumProperties(
   }
   for (const page of pagesToRemove) {
     if (verbose) {
-      console.log(`Removing page for ${getTitleFieldAsString(page, albumNameColumn)} last edited at ${new Date(page.last_edited_time).toLocaleString()} at url "${page.url}".`); // TODO: Control via "verbose" param.
+      console.log(`Removing page for ${getTitleFieldAsString(page, albumNameColumn)} last edited at ${new Date(page.last_edited_time).toLocaleString()} at url "${page.url}".`);
     }
   }
 

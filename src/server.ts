@@ -215,6 +215,9 @@ app.post('/stopImportingJob', (req: Request, res: Response) => {
     res.status(HttpStatus.OK);
 });
 
+// TODO: Cron job flag for updating stale albums (use map)
+// TODO: Cron job flag for updating spotify albums based on its album score (use map/associated object to track cutoff? not sure.)
+
 // Try and start an https server using secure credentials if we have them
 try {
     const certOptions = {

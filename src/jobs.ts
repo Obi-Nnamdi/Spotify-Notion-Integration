@@ -4,7 +4,7 @@ import path from 'path';
 import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notionhq/client";
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
-import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse, CreatePageParameters } from "@notionhq/client/build/src/api-endpoints";
+import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse, CreatePageParameters, UpdatePageParameters } from "@notionhq/client/build/src/api-endpoints";
 import { Album, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import * as fs from 'node:fs/promises';
 import inquirer from 'inquirer';
@@ -13,6 +13,9 @@ import { type } from "os";
 import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
 import { url } from "inspector";
 import { Logger } from 'winston';
+import { warn } from 'console';
+import { get } from 'http';
+import chalk from 'chalk';
 
 // For env File
 dotenv.config();
@@ -283,8 +286,8 @@ export async function importSavedSpotifyAlbums(
   // Get set of existing album IDs in our Notion Database to avoid adding duplicate albums
   const existingDatabasePages = await getAllDatabasePages(notion_database_id, /*showProgressBar=*/ false);
   const existingAlbumIDs: Set<string> = new Set(
-    existingDatabasePages.map((page) =>
-      getFullPlainText(getRichTextField(page, albumIdColumn)),
+    existingDatabasePages.flatMap((page) =>
+      getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn)
     ),
   );
 
@@ -330,13 +333,13 @@ export async function importSavedSpotifyAlbums(
       },
       properties: {
         [albumNameColumn]: {
-          title: [constructRichTextRequestField(album.name)],
+          title: [constructNotionTextContentBlock(album.name)],
         },
         [artistColumn]: {
-          rich_text: [constructRichTextRequestField(artistText)]
+          rich_text: [constructNotionTextContentBlock(artistText)]
         },
         [albumIdColumn]: {
-          rich_text: [constructRichTextRequestField(album.id)]
+          rich_text: [constructNotionTextContentBlock(album.id)]
         },
         [albumURLColumn]: {
           url: albumURL
@@ -373,6 +376,178 @@ export async function importSavedSpotifyAlbums(
   await Promise.all(notionUpdatePromises);
 }
 
+/**
+ * Updates "stale albums" in a Notion album database with fresh Album ID and URL information from a user's saved Spotify albums.
+ * A stale notion album is defined as a Notion album row that has the same artist and album name as a Spotify Album from a user's saved library
+ * but has a mismatched Spotify Album ID or URL.
+ * These stale albums will have their other properties (specifically ID and URL) updated.
+ * If multiple albums with the same artist and name exist in `savedAlbums`, their information is combined to update a stale albums' Album ID 
+ * (but only one of them is used for its URL)
+ * 
+ * @param savedAlbums List of spotify saved albums to use as ground truth when checking against Notion.
+ * @param notion_database_id Notion Database ID of database to check for stale albums in.
+ * @param albumNameColumn Name of property in notion database that stores album name information. Should be a "title" type.
+ * @param artistColumn Name of property in notion database that stores artist information. Should be a "rich text" type. 
+ * @param albumIdColumn Name of property in notion database that stores album id information. Should be "rich text" type.
+ * @param albumURLColumn Name of property in notion database that stores album URL information. Should be "rich text" type.
+ * @param logger Logger to use to print information about the updating process. If not specified, console.log is used.
+ * @param overwriteIDs If true, overwrites stale album IDs completely instead of appending new album IDs to the old ones with a ", " separator.
+ * @throws Error if any of the column names are invalid or if the database ID is invalid.
+ * Will also warn the user if any of the albums in `savedAlbums` are duplicates themselves in terms of album name/artist.
+ */
+export async function updateStaleNotionAlbumsFromSpotify(
+  savedAlbums: SavedAlbum[],
+  notion_database_id: string,
+  albumNameColumn: string,
+  artistColumn: string,
+  albumIdColumn: string,
+  albumURLColumn: string,
+  logger?: Logger | undefined,
+  overwriteIDs: boolean = false
+) {
+  const loggingFunc = logger?.verbose ?? console.log;
+  const warningFunc = logger?.warn ?? console.log;
+  loggingFunc(`Running stale album freshening job using ${savedAlbums.length} saved Spotify albums...`);
+
+  // Create map of album properties to their corresponding spotify album
+  const existingAlbumProperties = new Map<string, SavedAlbum[]>();
+  savedAlbums.forEach(album => {
+    const albumKey = createAlbumKey(
+      album.album.name,
+      getArtistStringFromAlbum(album.album)
+    );
+    if (existingAlbumProperties.has(albumKey)) {
+      // Warn users about duplicate albums in their spotify DB, adding an extra message if they're planning to overrite IDs
+      // TODO: I don't know if the warning string actually makes sense even 
+      const warningString = `Duplicate albums found in saved spotify albums for key "${albumKey}".${overwriteIDs ? "The first album will be used for an ID overrite." : ""}
+      Album ID of the first album is ${existingAlbumProperties.get(albumKey)![0]?.album.id}.
+      Album ID of the second album is ${album.album.id}.`;
+
+      // It's important for users to know this if they're overriting IDs, but not 
+      // so important if they're okay with just adding on all album IDs
+      if (overwriteIDs) {
+        warningFunc(warningString);
+      } else {
+        loggingFunc(warningString);
+      }
+
+      // Add album to map
+      existingAlbumProperties.get(albumKey)!.push(album);
+    }
+    else {
+      existingAlbumProperties.set(
+        albumKey,
+        [album]
+      )
+    }
+  });
+
+  // Get Notion Albums
+  const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
+  let databasePages = await getAllDatabasePages(databaseID);
+  loggingFunc(`Retrieved ${databasePages.length} pages in Notion album database.`);
+
+  // Get stale albums, as defined above.
+  const staleAlbumPages: PageObjectResponse[] = [];
+  databasePages.forEach(page => {
+    const albumName = getTitleFieldAsString(page, albumNameColumn);
+    const artistName = getRichTextFieldAsString(page, artistColumn);
+    const albumIDs = getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn);
+    const albumURL = getURLFieldAsString(page, albumURLColumn); // TODO: make function
+    const correspondingSpotifyAlbums = existingAlbumProperties.get(createAlbumKey(albumName, artistName));
+
+    // Don't handle pages that have no "ground truth" saved spotify albums.
+    if (correspondingSpotifyAlbums === undefined) {
+      return;
+    }
+
+    // Check for a mismatched URL or Album ID between the notion page and spotify album
+    // across any of the corresponding spotify albums
+    const correspondingSpotifyIDs = correspondingSpotifyAlbums.map(spotifyAlbum => spotifyAlbum.album.id) ?? [];
+    const correspondingSpotifyURLs = correspondingSpotifyAlbums.map(spotifyAlbum => spotifyAlbum.album.external_urls.spotify) ?? [];
+    let isStale = correspondingSpotifyIDs.some(albumID => !albumIDs.includes(albumID)) // Any album IDs that haven't been accounted for?
+      || !correspondingSpotifyURLs.includes(albumURL); // Is the page's URL one that belongs to one of the "ground truth" albums?
+
+    // If we're overwriting album IDs, an album becomes stale if there's
+    // any difference between the page's album IDs and the ground truth album IDs.
+    if (overwriteIDs) {
+      const pageAlbumIDSet = new Set(albumIDs);
+      isStale ||= !(correspondingSpotifyIDs.every(albumID => pageAlbumIDSet.has(albumID))
+        && pageAlbumIDSet.size === correspondingSpotifyIDs.length);
+    }
+
+    if (isStale) {
+      staleAlbumPages.push(page);
+    }
+  })
+
+  loggingFunc(`Found ${staleAlbumPages.length} stale albums.`);
+
+  // Update stale albums based on the spotify "ground truth" albums
+  // At a high level, what this code is trying to do is essentially update the album IDs/URLs 
+  // of notion albums that don't have the full "information"
+  await Promise.all(staleAlbumPages.map(async page => {
+    const albumName = getTitleFieldAsString(page, albumNameColumn);
+    const oldAlbumIDString = getRichTextFieldAsString(page, albumIdColumn);
+    const oldAlbumIDs = getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn);
+    const oldAlbumURL = getURLFieldAsString(page, albumURLColumn);
+
+    // Get corresponding album of each stale album
+    const correspondingSpotifyAlbums = existingAlbumProperties.get(createAlbumKey(
+      getTitleFieldAsString(page, albumNameColumn),
+      getRichTextFieldAsString(page, artistColumn)
+    ))!;
+    const newAlbumIDs = correspondingSpotifyAlbums!.map(album => album.album.id);
+
+    // Use the union of the old and new album IDs if we're not overwriting them.
+    // Otherwise, only use the new albums.
+    const albumIDUnionSet = new Set([oldAlbumIDs, newAlbumIDs].flat());
+    const albumsToWrite = overwriteIDs ? newAlbumIDs : [...albumIDUnionSet];
+
+    // Filter albums to choose based on if they're availiable in at least one country:
+    // (TODO: This could be done in a "smarter" way, by filtering albums that are within the user's country)
+    const availiableAlbums = correspondingSpotifyAlbums.filter(album => album.album.available_markets.length > 0);
+    let newAlbumURL: string;
+    if (availiableAlbums.length > 0) {
+      // Try to get an album URL that's availiable on spotify...
+      newAlbumURL = availiableAlbums[0]!.album.external_urls.spotify;
+    } else {
+      // Otherwise, just get the first non-availiable URL.
+      newAlbumURL = correspondingSpotifyAlbums[0]!.album.external_urls.spotify;
+    }
+
+    const notionAPIParams: UpdatePageParameters = {
+      page_id: page.id,
+
+      properties: {
+        [albumIdColumn]: {
+          type: "rich_text",
+          rich_text: [constructNotionTextContentBlock(makeStringFromAlbumIDs(albumsToWrite))]
+        },
+        [albumURLColumn]: {
+          type: "url",
+          url: newAlbumURL
+        }
+      }
+    };
+
+    await notion.pages.update(notionAPIParams); // Update page in Notion
+
+    // If we're not using a logger, display some parts of the changed text in orange for more readability.
+    // If we are, just add quotes instead.
+    const textHighlight = logger === undefined ? chalk.rgb(253, 147, 83) : (str: string) => `"${str}"`;
+    let loggingString = `Updated ${textHighlight(albumName)} with the following properties:`;
+    if (oldAlbumIDString !== makeStringFromAlbumIDs(albumsToWrite)) {
+      loggingString += `\nAlbum IDs: "${oldAlbumIDString}" --> ${textHighlight(makeStringFromAlbumIDs(albumsToWrite))}`;
+    }
+    if (oldAlbumURL !== newAlbumURL) {
+      loggingString += `\nAlbum URL: "${oldAlbumURL}" --> ${textHighlight(newAlbumURL)}`;
+    }
+    loggingFunc(loggingString); // TODO: get this working
+  }))
+  loggingFunc("Finished updating stale albums.");
+
+}
 /**
  * Updates Notion database pages without a filled Artist Column with an inferred artist based on the Album Name.
  * 
@@ -810,6 +985,24 @@ function getNumberField(page: PageObjectResponse, propertyName: string): number 
 }
 
 /**
+ * Gets URL contents for `propertyName `from `page`.
+ * 
+ * @param page Page to query property from
+ * @param propertyName Property Name to Query from `page`
+ * @returns URL from `page`'s URL field called `propertyName`, or the empty string if `propertyName` is empty in `page`.
+ * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a URL field.
+ */
+function getURLFieldAsString(page: PageObjectResponse, propertyName: string): string {
+  const urlProperty = page.properties[propertyName] ?? assert.fail();
+  assert(
+    urlProperty.type === "url",
+    `Property ${propertyName} is not title type.`
+  );
+
+  return urlProperty.url ?? "";
+}
+
+/**
  * Gets select field contents from `propertyName` from `page`.
  * 
  * @param page Page to query `propertyName` from.
@@ -831,6 +1024,29 @@ function getSelectFieldAsString(page: PageObjectResponse, propertyName: string):
 }
 
 /**
+ * Make a string from a list of album IDs.
+ * 
+ * @param albumIDs Array of album IDs to join together
+ * @param [delim=","] Delimiter to use when parsing album IDs from Notion pages. Defaults to ','.
+ * @returns string joining all albumIDs in order using the given delimeter.
+ */
+function makeStringFromAlbumIDs(albumIDs: string[], delim = ","): string {
+  return albumIDs.join(", ");
+}
+
+/**
+ * Gets the Spotify Album IDs corresponding to a Notion Page.
+ * 
+ * @param page Page to query `propertyName` from.
+ * @param propertyName Property Name to query from `page`.
+ * @param delim Delimiter to use when parsing album IDs from Notion pages. Defaults to ','.
+ */
+function getSpotifyAlbumIDsFromNotionPage(page: PageObjectResponse, propertyName: string, delim = ","): string[] {
+  const albumIDs = getRichTextFieldAsString(page, propertyName);
+  return albumIDs.split(delim).map(id => id.trim());
+}
+
+/**
  * Gets the full list of pages from a notion database query response, performing
  * type narrowing on the passed in QueryDatabaseResponse to a list of PageObjectResponses.
  * 
@@ -844,6 +1060,8 @@ function getFullPages(response: QueryDatabaseResponse): PageObjectResponse[] {
 
 /**
  * Gets a link to the album artwork for `artist`'s album `album`.
+ * NOTE: This function really should only be used if you can't do a direct call to the Spotify API, as album artwork
+ * can be very finicky and can be very easily incorrect.
  * 
  * @param artist Artist who created the album
  * @param album Album to get artwork from
@@ -869,11 +1087,11 @@ function getFullPlainText(richText: RichTextItemResponse[]): string {
 }
 
 /**
- * Constructs a Notion RichTextRequest Field from a single string field.
- * @param content Content to put in the rich text request field
- * @returns the constructed richTextRequest field.
+ * Constructs a basic Notion Text Content block from a single string field.
+ * @param content Content to put in the text content block
+ * @returns the constructed text content block object with no additional styling.
  */
-function constructRichTextRequestField(content: string): {
+function constructNotionTextContentBlock(content: string): {
   type: "text",
   text: {
     content: string;

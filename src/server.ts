@@ -5,7 +5,7 @@ import path from 'path';
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
-import { importSavedSpotifyAlbums } from './jobs';
+import { importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
 import { SpotifyAlbum } from './defs';
 import { CronJob } from 'cron';
 import { standardFormatDate } from './helpers';
@@ -16,7 +16,7 @@ import https from 'node:https';
 import { Logtail } from '@logtail/node';
 import { LogtailTransport } from '@logtail/winston';
 import winston from 'winston';
-// Using Chalk v4.1.2 on purpose: it's the only one that works with CommonJS.
+// Using Chalk v4.1.2 on purpose: it seems to be the most recent one that works with CommonJS.
 import chalk from 'chalk';
 
 // For env File
@@ -155,6 +155,21 @@ app.post('/importAlbums', expressAsyncHandler(async (req: Request, res: Response
     res.status(HttpStatus.OK).send(`Imported ${localSavedAlbums.length} Albums Successfully!`);
 }));
 
+// POST: Updates Stale Albums in Notion DB based on loaded Spotify Albums
+app.post('/updateStaleAlbums', expressAsyncHandler(async (req: Request, res: Response) => {
+    // TODO: Automatically retrieve albums if we haven't gotten them yet
+    await updateStaleNotionAlbumsFromSpotify(
+        localSavedAlbums,
+        notionDatabaseID,
+        albumNameColumn,
+        artistColumn,
+        albumIdColumn,
+        albumURLColumn,
+        /* logger = */ logger
+    );
+    res.status(HttpStatus.OK).send(`Updated Stale Albums!`);
+}))
+
 // GET: Retrieves the user token for the currently signed in user.
 app.get('/userToken', async (req: Request, res: Response) => {
     if (spotify !== undefined) {
@@ -225,6 +240,8 @@ async function runImportingJob() {
         logger.warn("Skipping Importing Job because internal Spotify Access Token is not populated.");
         return;
     }
+    // This will randomly fail sometimes because of a failure to refresh access token
+    // See https://community.spotify.com/t5/Spotify-for-Developers/Cannot-refresh-access-token-500-quot-server-error-quot-Failed-to/td-p/5191168
     try {
         // Load and import saved spotify albums
         logger.info("Importing Loaded Albums from Spotify...");

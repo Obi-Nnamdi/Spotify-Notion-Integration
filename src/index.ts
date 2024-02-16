@@ -124,6 +124,17 @@ importAlbumsButton.onclick = async () => {
     importAlbumsButton.textContent = "Import Albums into Notion";
 }
 
+// Updating stale albums
+const updateStaleAlbumsButton = document.getElementById("updateStaleAlbumsButton") ?? assert.fail("Bad ID");
+updateStaleAlbumsButton.onclick = async () => {
+    const originalButtonText = updateStaleAlbumsButton.textContent;
+    const updateStaleAlbumResponse = fetch("/updateStaleAlbums", { method: "POST" });
+    updateStaleAlbumsButton.textContent = "Updating...";
+    await updateStaleAlbumResponse;
+    await updatePage();
+    updateStaleAlbumsButton.textContent = originalButtonText;
+}
+
 // Buttons for starting/stopping importing Cron Job
 const importJobStartButton = document.getElementById("startImportingJob") ?? assert.fail("Bad ID");
 importJobStartButton.onclick = async () => {

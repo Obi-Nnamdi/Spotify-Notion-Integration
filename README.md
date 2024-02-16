@@ -116,3 +116,4 @@ From there, click the "Load Spotify Albums" button to load the saved albums from
 After loading the albums, you can click the "Import Albums into Notion" button to import the loaded albums into your Notion database or click the "Sign Out" button to sign out of the app.
 
 <!-- TODO: Add "logging" section -->
+<!-- TODO: Add explanations about the different types of Cron Jobs -->

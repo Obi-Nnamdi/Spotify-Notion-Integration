@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
-import { SpotifyAlbum } from './defs';
+import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings } from './defs';
 import { CronJob } from 'cron';
 import { standardFormatDate } from './helpers';
 import cliProgress from 'cli-progress';
@@ -23,7 +23,6 @@ import chalk from 'chalk';
 dotenv.config();
 
 // Globals (I know, I know...)
-const spotifyScopes = ["user-library-read", "user-library-modify"];
 let spotify: SpotifyApi | undefined = undefined;
 let localSavedAlbums: SavedAlbum[] = [];
 
@@ -57,11 +56,18 @@ const logger = winston.createLogger({
 // Server Globals
 const app: Application = express();
 const port = process.env.PORT || 3000;
-const importingJob = new CronJob(
-    "0-59/15 * * * *", // Every 15 minutes
+
+// Cron Job Globals
+const cronJobFlags = new Map<string, boolean>([
+    [kImportingJob, true],
+    [kUpdatingStaleAlbumsJob, false]
+]);
+const cronJobInterval = 1; // minutes
+const albumDBJobs = new CronJob(
+    `0-59/${cronJobInterval} * * * *`, // Every 15 minutes
     // "* * * * * *", // Every second
     // "* * * * *", // Every Minute
-    runImportingJob,
+    runAlbumDBJobs,
     null, // don't do anything on completion
     false, // don't start automatically
     "America/New_York"
@@ -77,6 +83,7 @@ const dateDiscoveredColumn = "Date Discovered";
 
 // Middleware
 app.use(express.json()); // parse request bodies as JSON
+app.use(express.urlencoded({ extended: true })); // parse url-encoded content
 app.use(express.static('./')); // allows server to serve static content in this project
 // Log all requests to the server
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -93,7 +100,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
         endpointStringColor = chalk.blue;
     }
     const endpointString = endpointStringColor(`${req.method.toUpperCase()}: ${req.path}`);
-    // console.log(`${dateString} ${endpointString}`);
     logger.info(`${dateString} ${endpointString}`);
     next();
 })
@@ -201,18 +207,45 @@ app.post('/signout', (req: Request, res: Response) => {
     res.status(HttpStatus.OK).send("Successfully Logged Out!");
 });
 
-// POST: Starts cron job for automatically importing spotify albums
-app.post('/startImportingJob', (req: Request, res: Response) => {
-    importingJob.start();
-    logger.info(`Importing Cron Job Started! It will next run at ${standardFormatDate(importingJob.nextDate())}`);
-    res.status(HttpStatus.OK);
+// POST: Starts cron jobs that link spotify and notion databases
+app.post('/startCronJob', (req: Request, res: Response) => {
+    albumDBJobs.start();
+    logger.info(`Cron Job Started! It will next run at ${standardFormatDate(albumDBJobs.nextDate())}`);
+    res.sendStatus(HttpStatus.OK);
 });
 
-// POST: Ends cron job for automatically importing spotify albums
-app.post('/stopImportingJob', (req: Request, res: Response) => {
-    importingJob.stop();
-    logger.info("Importing Cron Job Stopped!");
-    res.status(HttpStatus.OK);
+// POST: Ends cron job that link spotify and notion databases
+app.post('/stopCronJob', (req: Request, res: Response) => {
+    albumDBJobs.stop();
+    logger.info("Cron Job Stopped!");
+    res.sendStatus(HttpStatus.OK);
+});
+
+// POST: Changes the jobs that are run in the main Cron Job.
+// Takes a form response where every key is a name of a job that should be enabled. The other jobs are disabled.
+// TODO: Add functionality to change the cron job interval
+app.post('/editCronJob', (req: Request, res: Response) => {
+    const newJobs: Set<string> = new Set(Object.keys(req.body));
+    newJobs.forEach(jobName => cronJobFlags.set(jobName, true));
+    cronJobFlags.forEach((value, key) => {
+        if (!newJobs.has(key)) {
+            cronJobFlags.set(key, false);
+        }
+    })
+    logger.info(`Updated Cron Job Jobs: ${chalk.blue(Array.from(newJobs).join(", "))}`);
+    res.sendStatus(HttpStatus.OK);
+});
+
+//GET: Gets Cron Job Settings
+app.get('/cronJobSettings', (req: Request, res: Response) => {
+    const jobSettings: CronJobSettings = {
+        enabled: albumDBJobs.running,
+        [kImportingJob]: cronJobFlags.get(kImportingJob) ?? false,
+        [kUpdatingStaleAlbumsJob]: cronJobFlags.get(kUpdatingStaleAlbumsJob) ?? false,
+        interval: cronJobInterval,
+        nextRun: standardFormatDate(albumDBJobs.nextDate()),
+    };
+    res.send(jobSettings);
 });
 
 // TODO: Cron job flag for updating stale albums (use map)
@@ -236,11 +269,13 @@ catch (Error) {
         logger.info(`Server is listening at http://localhost:${port}`);
     });
 }
-
+/**
+ * Job that imports saved spotify albums and puts them into the notion database.
+ */
 async function runImportingJob() {
     logger.info(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Importing Job...")}`);
     if (spotify === undefined) {
-        logger.warn("Skipping Importing Job because internal Spotify Access Token is not populated.");
+        logger.warn("Skipping Importing Job because internal Spotify access token is not populated.");
         return;
     }
     // This will randomly fail sometimes because of a failure to refresh access token
@@ -268,7 +303,54 @@ async function runImportingJob() {
         logger.error("Error occurred while running importing job!");
         logger.error(error);
     }
-    logger.info(`Done! Importing Job will next run at ${standardFormatDate(importingJob.nextDate())}`);
+}
+
+/**
+ * Job that updates the stale albums in the linked Notion Database. 
+ */
+async function runStaleAlbumUpdaterJob() {
+    logger.info(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Stale Album Updater Job...")}`);
+    if (spotify === undefined) {
+        logger.warn("Skipping Stale Album Updater Job because internal Spotify access token is not populated.");
+        return;
+    }
+    // This will randomly fail sometimes because of a failure to refresh access token
+    // See https://community.spotify.com/t5/Spotify-for-Developers/Cannot-refresh-access-token-500-quot-server-error-quot-Failed-to/td-p/5191168
+    try {
+        // Load and import saved spotify albums
+        logger.info("Importing Loaded Albums from Spotify...");
+        // Note that we don't update our cache of userSavedAlbums here, 
+        // this process runs separately in the background
+        const localSavedAlbums = await getSavedUserAlbums();
+        logger.info("Updating Stale Notion Albums based on saved Spotify albums...");
+        await updateStaleNotionAlbumsFromSpotify(
+            localSavedAlbums,
+            notionDatabaseID,
+            albumNameColumn,
+            artistColumn,
+            albumIdColumn,
+            albumURLColumn,
+            /* logger = */ logger
+        );
+    }
+    catch (error) {
+        logger.error("Error occurred while running stale album updating job!");
+        logger.error(error);
+    }
+}
+
+/**
+ * Main Cron Job function that runs all enabled jobs.
+ */
+async function runAlbumDBJobs() {
+    logger.info(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Jobs...")}`);
+    if (cronJobFlags.get(kImportingJob)) {
+        await runImportingJob();
+    }
+    if (cronJobFlags.get(kUpdatingStaleAlbumsJob)) {
+        await runStaleAlbumUpdaterJob();
+    }
+    logger.info(`Done! Jobs will next run at ${standardFormatDate(albumDBJobs.nextDate())}`);
 }
 
 /**

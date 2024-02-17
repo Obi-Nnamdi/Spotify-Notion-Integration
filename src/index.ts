@@ -3,7 +3,7 @@ import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notion
 import { strict as assert } from 'assert';
 import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
 import { SpotifyApi } from '@spotify/web-api-ts-sdk';
-import { SpotifyAlbum } from './defs';
+import { SpotifyAlbum, CronJobSettings, kImportingJob, kUpdatingStaleAlbumsJob } from './defs';
 
 const spotifyClientId = process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID in env file.");
 const spotifyScopes = ["user-library-read", "user-library-modify"];
@@ -89,6 +89,37 @@ async function showAlbums() {
     albumsElement.appendChild(table);
 }
 
+/**
+ * Updates Cron Job Settings based on the server response.
+*/
+async function updateCronJobSettings() {
+    const cronJobResponse = await fetch("/cronJobSettings");
+    const cronJobSettings: CronJobSettings = await cronJobResponse.json();
+    // Update Cron Job Settings
+    const cronJobSettingsElement = document.getElementById("cronJobSettings") ?? assert.fail("Bad ID");
+    cronJobSettingsElement.innerHTML = `<pre>Enabled: ${cronJobSettings.enabled}</pre><pre>Interval: ${cronJobSettings.interval} minutes.</pre>`;
+    // Update Cron Job Checkboxes
+    const cronJobNamesToIDs: Map<keyof CronJobSettings, string> = new Map([
+        [kImportingJob, "importAlbumsToggle"], [kUpdatingStaleAlbumsJob, "updateStaleAlbumsToggle"]
+    ])
+    cronJobNamesToIDs.forEach((id, cronJobName) => {
+        const checkbox = (document.getElementById(id) as HTMLInputElement) ?? assert.fail("Bad ID");
+        if (hasOwnProperty(cronJobSettings, cronJobName)) {
+            checkbox.checked = cronJobSettings[cronJobName] as boolean;
+        }
+    })
+}
+
+// Helper function for doing type narrowing on an object's keys
+// see: https://fettblog.eu/typescript-hasownproperty/ 
+// and https://dev.to/mapleleaf/indexing-objects-in-typescript-1cgi#comment-m263
+function hasOwnProperty<O extends object, K extends PropertyKey>(
+    obj: O,
+    key: K,
+): obj is O & Record<K, unknown> {
+    return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 const authButton = document.getElementById("AuthButton") ?? assert.fail("Bad ID");
 authButton.onclick = async () => { await authSpotify(); await showToken(); };
 
@@ -101,7 +132,7 @@ window.onload = async (event) => {
  * Updates the dynamic components of the webpage.
  */
 async function updatePage() {
-    await Promise.all([showToken(), showAlbums()]);
+    await Promise.all([showToken(), showAlbums(), updateCronJobSettings()]);
 }
 
 // Load the user albums
@@ -138,11 +169,13 @@ updateStaleAlbumsButton.onclick = async () => {
 // Buttons for starting/stopping importing Cron Job
 const importJobStartButton = document.getElementById("startImportingJob") ?? assert.fail("Bad ID");
 importJobStartButton.onclick = async () => {
-    await fetch("/startImportingJob", { method: "POST" });
+    await fetch("/startCronJob", { method: "POST" });
+    await updateCronJobSettings();
 }
 const importJobStopButton = document.getElementById("stopImportingJob") ?? assert.fail("Bad ID");
 importJobStopButton.onclick = async () => {
-    await fetch("/stopImportingJob", { method: "POST" });
+    await fetch("/stopCronJob", { method: "POST" });
+    await updateCronJobSettings();
 }
 
 // Send post request to "/signout" when signout button is clicked

@@ -13,10 +13,22 @@
         <button id="loadAlbumsButton">Load Spotify Albums</button>
         <button id="importAlbumsButton">Import Albums into Notion</button>
         <button id="updateStaleAlbumsButton">Update Stale Albums in Notion based on Spotify Albums</button>
-        <button id="startImportingJob">Start an Importing Cron Job (runs every 15 minutes)</button>
-        <button id="stopImportingJob">Stop the Importing Cron Job</button>
+        <button id="startImportingJob">Start the Cron Job(s) (runs every 15 minutes)</button>
+        <button id="stopImportingJob">Stop the Cron Job(s)</button>
         <button id="signoutButton">Sign Out</button>
     </div>
+    <h3>Cron Job Settings:</h3>
+    <div id="cronJobSettings"></div>
+    <h4>Jobs to Run:</h4>
+    <form action="/editCronJob" method="post" target="void_iframe">
+        <input type="checkbox" name="importAlbums" id="importAlbumsToggle" value="importAlbums">
+        <label for="importAlbumsToggle">Import Albums</label><br>
+        <input type="checkbox" name="updateStaleAlbums" id="updateStaleAlbumsToggle" value="updateStaleAlbums">
+        <label for="updateStaleAlbumsToggle">Update Stale Albums</label><br>
+        <input type="submit" value="Submit">
+    </form>
+    <iframe name="void_iframe" style="display:none;"></iframe>
+    <p id="cronJobStatus"></p>
     <script type = "text/javascript" src="./dist/bundle.js"></script>
     <pre><p id = "tokenResponse">Token Information: </p></pre>
     <h3>Saved Spotify Albums:</h3>

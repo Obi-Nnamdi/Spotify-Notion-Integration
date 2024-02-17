@@ -380,7 +380,6 @@ export async function importSavedSpotifyAlbums(
  * (but only one of them is used for its URL)
  * 
  * @param savedAlbums List of spotify saved albums to use as ground truth when checking against Notion.
- * @param notion_database_id Notion Database ID of database to check for stale albums in.
  * @param albumNameColumn Name of property in notion database that stores album name information. Should be a "title" type.
  * @param artistColumn Name of property in notion database that stores artist information. Should be a "rich text" type. 
  * @param albumIdColumn Name of property in notion database that stores album id information. Should be "rich text" type.
@@ -392,7 +391,6 @@ export async function importSavedSpotifyAlbums(
  */
 export async function updateStaleNotionAlbumsFromSpotify(
   savedAlbums: SavedAlbum[],
-  notion_database_id: string,
   albumNameColumn: string,
   artistColumn: string,
   albumIdColumn: string,

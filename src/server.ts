@@ -166,7 +166,6 @@ app.post('/updateStaleAlbums', expressAsyncHandler(async (req: Request, res: Res
     // TODO: Automatically retrieve albums if we haven't gotten them yet
     await updateStaleNotionAlbumsFromSpotify(
         localSavedAlbums,
-        notionDatabaseID,
         albumNameColumn,
         artistColumn,
         albumIdColumn,
@@ -324,7 +323,6 @@ async function runStaleAlbumUpdaterJob() {
         logger.info("Updating Stale Notion Albums based on saved Spotify albums...");
         await updateStaleNotionAlbumsFromSpotify(
             localSavedAlbums,
-            notionDatabaseID,
             albumNameColumn,
             artistColumn,
             albumIdColumn,

@@ -248,7 +248,6 @@ app.get('/cronJobSettings', (req: Request, res: Response) => {
     res.send(jobSettings);
 });
 
-// TODO: Cron job flag for updating stale albums (use map)
 // TODO: Cron job flag for updating spotify albums based on its album score (use map/associated object to track cutoff? not sure.)
 
 // Try and start an https server using secure credentials if we have them

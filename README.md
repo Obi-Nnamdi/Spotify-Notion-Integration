@@ -35,9 +35,12 @@ The CLI app supports the following cleanup operations on a Notion Album Database
 For this project to work, you should have a notion database that has (at least) a title column for an Album Name, and another text column for the album artist.
 
 - Right now, these columns should be called "Album Name" and "Artist" respectively when importing albums from Spotify to Notion, but they can be changed to different names when running the CLI app.
-- Each row of the database correspond to an album.
+- Each row of the database corresponds to an album.
 - When running certain jobs, the code will also optionally look for column names:
   - When removing duplicate albums, the code will optionally look for a "Rating" column on an album page and prioritize keeping the same album with a rating.
+  - When filtering albums on the web app, the code will look for an "Include in Spotify" boolean formula column to decide what albums to keep/remove in your spotify library.
+
+<!-- TODO: Include table for column names to what they do, what they're called by default, and which columns are required for each job/application -->
 
 
 You should also have [Node](https://nodejs.org/en/download) installed.

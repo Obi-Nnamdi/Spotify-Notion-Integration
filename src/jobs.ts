@@ -356,7 +356,6 @@ export async function importSavedSpotifyAlbums(
       }
     }
     // add URL separately because of type checking issues
-    // notionAPIParams.properties[albumURLColumn] = { url: albumURL, name: albumURLColumn };
     notion.pages.create(notionAPIParams);
     loggingFunc(`Imported album "${album.name}".`);
   });

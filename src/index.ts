@@ -184,3 +184,5 @@ signoutButton.onclick = async () => {
     await fetch("/signout", { method: "POST" });
     await updatePage();
 }
+
+// TODO: add dropdown funtionality to use for colum picking. Get columns using the notion SDK and database ID.

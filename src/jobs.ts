@@ -1,6 +1,3 @@
-import express, { Express, Request, Response, Application } from 'express';
-import HttpStatus from 'http-status-codes';
-import path from 'path';
 import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notionhq/client";
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
@@ -9,13 +6,9 @@ import { Album, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import * as fs from 'node:fs/promises';
 import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
-import { type } from "os";
-import AlbumsEndpoints from "@spotify/web-api-ts-sdk/dist/mjs/endpoints/AlbumsEndpoints";
-import { url } from "inspector";
 import { Logger } from 'winston';
-import { warn } from 'console';
-import { get } from 'http';
 import chalk from 'chalk';
+import { chunkArray, arrayIntersect, arrayDifference } from "./helpers";
 
 // For env File
 dotenv.config();
@@ -384,7 +377,7 @@ export async function importSavedSpotifyAlbums(
  * @param artistColumn Name of property in notion database that stores artist information. Should be a "rich text" type. 
  * @param albumIdColumn Name of property in notion database that stores album id information. Should be "rich text" type.
  * @param albumURLColumn Name of property in notion database that stores album URL information. Should be "rich text" type.
- * @param logger Logger to use to print information about the updating process. If not specified, console.log is used.
+ * @param logger Logger to use to print information about the updating process. If not specified, the console is used.
  * @param overwriteIDs If true, overwrites stale album IDs completely instead of appending new album IDs to the old ones with a ", " separator.
  * @throws Error if any of the column names are invalid or if the database ID is invalid.
  * Will also warn the user if any of the albums in `savedAlbums` are duplicates themselves in terms of album name/artist.
@@ -399,7 +392,7 @@ export async function updateStaleNotionAlbumsFromSpotify(
   overwriteIDs: boolean = false
 ) {
   const loggingFunc = logger?.verbose ?? console.log;
-  const warningFunc = logger?.warn ?? console.log;
+  const warningFunc = logger?.warn ?? console.warn;
   loggingFunc(`Running stale album freshening job using ${savedAlbums.length} saved Spotify albums...`);
 
   // Create map of album properties to their corresponding spotify album
@@ -436,7 +429,7 @@ export async function updateStaleNotionAlbumsFromSpotify(
 
   // Get Notion Albums
   const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
-  let databasePages = await getAllDatabasePages(databaseID);
+  const databasePages = await getAllDatabasePages(databaseID);
   loggingFunc(`Retrieved ${databasePages.length} pages in Notion album database.`);
 
   // Get stale albums, as defined above.
@@ -540,6 +533,106 @@ export async function updateStaleNotionAlbumsFromSpotify(
   loggingFunc("Finished updating stale albums.");
 
 }
+
+/**
+ * Uses a user-defined function to change a user's list of saved spotify albums.
+ * @param spotify SpotifyAPI instance that contains an access token.
+ * @param filterFunction A function that takes the list of notion pages in the linked album database and
+ * transforms them of a list of IDs to add and remove from a user's library. The lists should be mutually exclusive.
+ * @param logger Logger to use to print information about the updating process. If not specified, the console is used.
+ * @param originalSavedAlbums Original list of the user's saved albums. If defined, it's used to produce a helpful log output.
+ */
+async function filterSpotifyLibraryWithNotionPages(
+  spotify: SpotifyApi,
+  filterFunction: (notionAlbumPages: PageObjectResponse[]) => { add: string[], remove: string[] },
+  logger?: Logger | undefined,
+  originalSavedAlbums?: SavedAlbum[] | undefined,
+): Promise<void> {
+  const loggingFunc = logger?.verbose ?? console.log;
+  loggingFunc("Filtering saved spotify albums...");
+
+  // Get album IDs that we're saving and removing
+  const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
+  const databasePages = await getAllDatabasePages(databaseID);
+  const { add, remove } = filterFunction(databasePages);
+  // Confirm mutual exclusivity between add and remove
+  if (arrayIntersect(add, remove).length > 0) {
+    throw new Error(`Filtering function should produce mutually exclusive lists. The elements [${arrayIntersect(add, remove).join(", ")}] belong to both arrays.`)
+  }
+
+  // Print spotify library changelist
+  if (originalSavedAlbums !== undefined) {
+    const addDiff = originalSavedAlbums.filter(album => !add.includes(album.album.id));
+    const removeDiff = originalSavedAlbums.filter(album => remove.includes(album.album.id));
+    const addStringHeader = addDiff.length > 0 ? `${addDiff.length} albums were added:` : "No albums were added.";
+    const addStringBody = addDiff.map(album => `Added "${createAlbumKeyFromSpotifyAlbum(album.album)}".`).join("\n");
+    const removeStringHeader = removeDiff.length > 0 ? `${removeDiff.length} albums were removed:` : "No albums were removed.";
+    const removeStringBody = removeDiff.map(album => `Removed "${createAlbumKeyFromSpotifyAlbum(album.album)}".`).join("\n");
+
+    loggingFunc(
+      `${addStringHeader}\n${addStringBody}\n${removeStringHeader}\n${removeStringBody}`
+    );
+  }
+  else {
+    loggingFunc(`Putting ${add.length} album pages in spotify library, and excluding ${remove.length} albums.`);
+  }
+
+  // Split add and remove lists into chunks of 50 (spotify API limit)
+  const chunkSize = 50; // spotify API limit
+  const addChunks = chunkArray(add, chunkSize);
+  const removeChunks = chunkArray(remove, chunkSize);
+
+  // Make spotify API calls
+  const addPromise = Promise.all(addChunks.map(chunk => spotify.currentUser.albums.saveAlbums(chunk)))
+  const removePromise = Promise.all(removeChunks.map(chunk => spotify.currentUser.albums.removeSavedAlbums(chunk)))
+  await Promise.all([addPromise, removePromise]);
+
+  loggingFunc("Finished filtering saved spotify albums.");
+}
+
+/**
+ * Filters a user's saved spotify albums based on a user-defined boolean formula column.
+ * 
+ * Note that the album filtering process is only effective if the album IDs in the notion pages are up to date.
+ * For this reason, it's recommended to run the {@link updateStaleNotionAlbumsFromSpotify} function before running this one.
+ * 
+ * @param spotify SpotifyAPI instance that contains an access token.
+ * @param albumIdColumn Name of property in notion database that stores album id information. Should be "rich text" type.
+ * @param includeInSpotifyColumn Formula column with a boolean return value. 
+ * Column should be true if the album represented by a notion page should be included in the user's spotify library,
+ * and false if the album should be removed from/not added to the library.
+ * @param logger Logger to use to print information about the updating process. If not specified, the console is used.
+ * @param originalSavedAlbums Original list of the user's saved albums. If defined, it's used to produce a helpful log output.
+ */
+async function filterSpotifyLibraryUsingIncludeColumn(
+  spotify: SpotifyApi,
+  albumIdColumn: string,
+  includeInSpotifyColumn: string,
+  logger?: Logger | undefined,
+  originalSavedAlbums?: SavedAlbum[] | undefined
+): Promise<void> {
+  const loggingFunc = logger?.verbose ?? console.log;
+  loggingFunc(`Reading column "${includeInSpotifyColumn}" to filter spotify library...`);
+
+  // Define function for filtering albums
+  const includeColumnFilteringFunction = (notionAlbumPages: PageObjectResponse[]) => {
+    const add: string[] = [];
+    const remove: string[] = [];
+    // If page's formula evaluates to true, add its album IDs to the add list, and vice versa for the remove list.
+    notionAlbumPages.forEach(page => {
+      const includeProperty = getFormulaPropertyAsBoolean(page, includeInSpotifyColumn);
+      if (includeProperty) {
+        add.push(...getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn));
+      }
+      else {
+        remove.push(...getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn));
+      }
+    })
+    return { add, remove };
+  }
+  await filterSpotifyLibraryWithNotionPages(spotify, includeColumnFilteringFunction, logger, originalSavedAlbums);
+}
+
 /**
  * Updates Notion database pages without a filled Artist Column with an inferred artist based on the Album Name.
  * 
@@ -1016,6 +1109,26 @@ function getSelectFieldAsString(page: PageObjectResponse, propertyName: string):
 }
 
 /**
+ * Gets the boolean formula field contents of `propertyName` from `page`. 
+ * If the formula has a boolean return type but has no boolean data, it's automatically treated as false.
+ * 
+ * @param page Page to query property from
+ * @param propertyName Property Name to query from `page`.
+ * @return boolean value associated with the formula's output on `page`.
+ */
+// TODO: if I want to try to make this more general and return any sub-type of a formula propery, I could edit the function to use conditional types:
+// see https://stackoverflow.com/questions/54165536/typescript-function-return-type-based-on-input-parameter
+function getFormulaPropertyAsBoolean(page: PageObjectResponse, propertyName: string): boolean {
+  const formulaProperty = page.properties[propertyName] ?? assert.fail();
+  assert(formulaProperty.type === "formula", `Property ${propertyName} is not formula type.`);
+
+  const innerFormulaValue = formulaProperty.formula
+  assert(innerFormulaValue.type === "boolean", `Property ${propertyName} is not boolean type.`);
+
+  return innerFormulaValue.boolean ?? false;
+}
+
+/**
  * Make a string from a list of album IDs.
  * 
  * @param albumIDs Array of album IDs to join together
@@ -1118,6 +1231,19 @@ function getArtistStringFromAlbum(album: Album) {
 function createAlbumKey(albumName: string, albumArtist: string) {
   // TODO: issue with hashing if the artists are written slightly differently between the same albums (i.e. in the wrong order).
   return `${albumName.trim().toLowerCase()} - ${albumArtist.trim().toLowerCase()}`;
+}
+/**
+ * Creates an album key from a saved spotify album
+ * 
+ * @param album Spotify album to create key from.
+ * @returns String joining the trimmed and lowercased album name and artist in the format 
+ * "{albumName} - {albumArtist}".
+ */
+function createAlbumKeyFromSpotifyAlbum(album: Album) {
+  return createAlbumKey(
+    album.name,
+    getArtistStringFromAlbum(album)
+  );
 }
 
 if (require.main === module) {

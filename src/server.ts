@@ -24,7 +24,7 @@ dotenv.config();
 
 // Globals (I know, I know...)
 let spotify: SpotifyApi | undefined = undefined;
-let localSavedAlbums: SavedAlbum[] = [];
+let cachedSavedAlbums: SavedAlbum[] = [];
 
 // Logging Globals
 const MiBSize = 1024 * 1024;
@@ -134,7 +134,7 @@ app.post('/loadAlbums', expressAsyncHandler(async (req: Request, res: Response) 
     res.status(HttpStatus.OK).send(`Loaded ${savedAlbums.length} albums from Spotify!`);
 
     // Cache Saved Albums
-    localSavedAlbums = savedAlbums;
+    cachedSavedAlbums = savedAlbums;
 }));
 
 // POST: Imports Albums into Notion.
@@ -148,7 +148,7 @@ app.post('/importAlbums', expressAsyncHandler(async (req: Request, res: Response
 
     // TODO: Automatically retrieve albums if we haven't gotten them yet
     await importSavedSpotifyAlbums(
-        localSavedAlbums,
+        cachedSavedAlbums,
         notionDatabaseID,
         albumNameColumn,
         artistColumn,
@@ -158,14 +158,14 @@ app.post('/importAlbums', expressAsyncHandler(async (req: Request, res: Response
         dateDiscoveredColumn,
         /* logger = */ logger
     );
-    res.status(HttpStatus.OK).send(`Imported ${localSavedAlbums.length} Albums Successfully!`);
+    res.status(HttpStatus.OK).send(`Imported ${cachedSavedAlbums.length} Albums Successfully!`);
 }));
 
 // POST: Updates Stale Albums in Notion DB based on loaded Spotify Albums
 app.post('/updateStaleAlbums', expressAsyncHandler(async (req: Request, res: Response) => {
     // TODO: Automatically retrieve albums if we haven't gotten them yet
     await updateStaleNotionAlbumsFromSpotify(
-        localSavedAlbums,
+        cachedSavedAlbums,
         albumNameColumn,
         artistColumn,
         albumIdColumn,
@@ -186,7 +186,7 @@ app.get('/userToken', async (req: Request, res: Response) => {
 
 // GET: Retrieves the user's saved albums.
 app.get('/userAlbums', (req: Request, res: Response) => {
-    res.send(localSavedAlbums.map(savedAlbum => {
+    res.send(cachedSavedAlbums.map(savedAlbum => {
         const album: SpotifyAlbum = {
             name: savedAlbum.album.name,
             artists: savedAlbum.album.artists.map(artist => artist.name),
@@ -201,7 +201,7 @@ app.get('/userAlbums', (req: Request, res: Response) => {
 // POST: Signs out the current user. 
 app.post('/signout', (req: Request, res: Response) => {
     spotify = undefined;
-    localSavedAlbums = [];
+    cachedSavedAlbums = [];
     logger.info("Logged Out!");
     res.status(HttpStatus.OK).send("Successfully Logged Out!");
 });

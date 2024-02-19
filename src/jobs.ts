@@ -555,26 +555,29 @@ async function filterSpotifyLibraryWithNotionPages(
   const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
   loggingFunc(`Getting all pages in Notion Database...`);
   const databasePages = await getAllDatabasePages(databaseID);
-  const { add, remove } = filterFunction(databasePages);
+  let { add, remove } = filterFunction(databasePages);
   // Confirm mutual exclusivity between add and remove
   if (arrayIntersect(add, remove).length > 0) {
     throw new Error(`Filtering function should produce mutually exclusive lists. The elements [${arrayIntersect(add, remove).join(", ")}] belong to both arrays.`)
   }
 
+  // Using the user's list of saved spotify albums, we can remove albums that are already added/removed from the album library
+  if (originalSavedAlbums !== undefined) {
+    const originalSavedAlbumIDs = originalSavedAlbums.map(album => album.album.id);
+    // The new added IDs are the ones that weren't already in the original saved album IDs
+    add = arrayDifference(add, originalSavedAlbumIDs);
+    // The new removed IDs are the ones that were in the original saved album IDs
+    remove = arrayIntersect(originalSavedAlbumIDs, remove);
+  }
+
   // Print spotify library changelist
   // TODO: should I just automatically get spotify albums?
   if (originalSavedAlbums !== undefined) {
-    const originalSavedAlbumIDs = originalSavedAlbums.map(album => album.album.id);
-
-    // The new added IDs are the ones that weren't already in the original saved album IDs
-    const newAddedIDs = arrayDifference(add, originalSavedAlbumIDs);
-    // Lookup the new added album IDs
-    const addDiff = await Promise.all(chunkArray([...newAddedIDs], spotifyChunkSizeLimit)
+    // Lookup the new added album IDs (don't need to look up the removed album IDs)
+    const addDiff = await Promise.all(chunkArray([...add], spotifyChunkSizeLimit)
       .map(chunk => spotify.albums.get(chunk)))
       .then(chunks => chunks.flat());
-    // The new removed IDs are the ones that were in the original saved album IDs
-    const newRemovedIDs = arrayIntersect(originalSavedAlbumIDs, remove);
-    const removeDiff = originalSavedAlbums.filter(album => newRemovedIDs.includes(album.album.id)).map(savedAlbum => savedAlbum.album);
+    const removeDiff = originalSavedAlbums.filter(album => remove.includes(album.album.id)).map(savedAlbum => savedAlbum.album);
 
     // Construct log output
     const addStringHeader = addDiff.length > 0 ? `${chalk.green(addDiff.length)} albums were ${chalk.green("added")}:` : "No albums were added.";
@@ -588,7 +591,7 @@ async function filterSpotifyLibraryWithNotionPages(
     loggingFunc(`Putting ${add.length} album pages in spotify library, and excluding ${remove.length} albums.`);
   }
 
-  // Split add and remove lists into chunks of 50 (spotify API limit)
+  // Split add and remove lists into chunks of spotify's API limit
   const addChunks = chunkArray(add, spotifyChunkSizeLimit);
   const removeChunks = chunkArray(remove, spotifyChunkSizeLimit);
 

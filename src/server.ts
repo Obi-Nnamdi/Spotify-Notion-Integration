@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { filterSpotifyLibraryUsingIncludeColumn, importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
-import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings } from './defs';
+import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings, kFilteringSpotifyLibraryJob } from './defs';
 import { CronJob } from 'cron';
 import { standardFormatDate } from './helpers';
 import cliProgress from 'cli-progress';
@@ -60,7 +60,8 @@ const port = process.env.PORT || 3000;
 // Cron Job Globals
 const cronJobFlags = new Map<string, boolean>([
     [kImportingJob, true],
-    [kUpdatingStaleAlbumsJob, false]
+    [kUpdatingStaleAlbumsJob, false],
+    [kFilteringSpotifyLibraryJob, false]
 ]);
 const cronJobInterval = 15; // minutes
 const albumDBJobs = new CronJob(
@@ -260,13 +261,12 @@ app.get('/cronJobSettings', (req: Request, res: Response) => {
         enabled: albumDBJobs.running,
         [kImportingJob]: cronJobFlags.get(kImportingJob) ?? false,
         [kUpdatingStaleAlbumsJob]: cronJobFlags.get(kUpdatingStaleAlbumsJob) ?? false,
+        [kFilteringSpotifyLibraryJob]: cronJobFlags.get(kFilteringSpotifyLibraryJob) ?? false,
         interval: cronJobInterval,
         nextRun: standardFormatDate(albumDBJobs.nextDate()),
     };
     res.send(jobSettings);
 });
-
-// TODO: Cron job flag for updating spotify albums based on its album score (use map/associated object to track cutoff? not sure.)
 
 // Try and start an https server using secure credentials if we have them
 try {
@@ -346,11 +346,44 @@ async function runStaleAlbumUpdaterJob() {
             artistColumn,
             albumIdColumn,
             albumURLColumn,
-            /* logger = */ logger
+            /* logger = */ logger,
+            /* overwriteIDs = */ true
         );
     }
     catch (error) {
         logger.error("Error occurred while running stale album updating job!");
+        logger.error(error);
+    }
+}
+
+/**
+ * Job that filters the albums in a user's spotify library based on the linked Notion Database.
+ */
+async function runSpotifyLibraryFilteringJob() {
+    logger.info(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Spotify Library Filtering Job...")}`);
+    if (spotify === undefined) {
+        logger.warn("Skipping Spotify Library Filtering Job because internal Spotify access token is not populated.");
+        return;
+    }
+    // This will randomly fail sometimes because of a failure to refresh access token
+    // See https://community.spotify.com/t5/Spotify-for-Developers/Cannot-refresh-access-token-500-quot-server-error-quot-Failed-to/td-p/5191168
+    try {
+        // Load and import saved spotify albums
+        logger.info("Importing Loaded Albums from Spotify...");
+        // Note that we don't update our cache of userSavedAlbums here, 
+        // this process runs separately in the background
+        const localSavedAlbums = await getSavedUserAlbums();
+        logger.info("Filtering Spotify library based on Notion album pages...");
+        await filterSpotifyLibraryUsingIncludeColumn(
+            spotify,
+            albumIdColumn,
+            includeInSpotifyColumn,
+            /* logger = */ logger,
+            /* originalSavedAlbums = */ localSavedAlbums
+        );
+    }
+    catch (error) {
+        logger.error("Error occurred while running spotify library filtering job!");
         logger.error(error);
     }
 }
@@ -365,6 +398,9 @@ async function runAlbumDBJobs() {
     }
     if (cronJobFlags.get(kUpdatingStaleAlbumsJob)) {
         await runStaleAlbumUpdaterJob();
+    }
+    if (cronJobFlags.get(kFilteringSpotifyLibraryJob)) {
+        await runSpotifyLibraryFilteringJob();
     }
     logger.info(`Done! Jobs will next run at ${standardFormatDate(albumDBJobs.nextDate())}`);
 }

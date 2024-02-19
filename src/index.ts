@@ -3,7 +3,7 @@ import { Client, collectPaginatedAPI, isFullDatabase, isFullPage } from "@notion
 import { strict as assert } from 'assert';
 import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse, TextRichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
 import { SpotifyApi } from '@spotify/web-api-ts-sdk';
-import { SpotifyAlbum, CronJobSettings, kImportingJob, kUpdatingStaleAlbumsJob } from './defs';
+import { SpotifyAlbum, CronJobSettings, kImportingJob, kUpdatingStaleAlbumsJob, kFilteringSpotifyLibraryJob } from './defs';
 
 const spotifyClientId = process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID in env file.");
 const spotifyScopes = ["user-library-read", "user-library-modify"];
@@ -100,7 +100,7 @@ async function updateCronJobSettings() {
     cronJobSettingsElement.innerHTML = `<pre>Enabled: ${cronJobSettings.enabled}</pre><pre>Interval: ${cronJobSettings.interval} minutes.</pre>`;
     // Update Cron Job Checkboxes
     const cronJobNamesToIDs: Map<keyof CronJobSettings, string> = new Map([
-        [kImportingJob, "importAlbumsToggle"], [kUpdatingStaleAlbumsJob, "updateStaleAlbumsToggle"]
+        [kImportingJob, "importAlbumsToggle"], [kUpdatingStaleAlbumsJob, "updateStaleAlbumsToggle"], [kFilteringSpotifyLibraryJob, "filterSpotifyLibraryToggle"]
     ])
     cronJobNamesToIDs.forEach((id, cronJobName) => {
         const checkbox = (document.getElementById(id) as HTMLInputElement) ?? assert.fail("Bad ID");

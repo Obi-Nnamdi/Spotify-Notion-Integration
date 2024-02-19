@@ -11,6 +11,7 @@ export interface SpotifyAlbum {
 //  Cron Job Globals
 export const kImportingJob = "importAlbums";
 export const kUpdatingStaleAlbumsJob = "updateStaleAlbums";
+export const kFilteringSpotifyLibraryJob = "filterSpotifyLibrary";
 
 /**
  * Interface for Cron Job Settings.
@@ -19,6 +20,7 @@ export interface CronJobSettings {
     enabled: boolean;
     [kImportingJob]: boolean;
     [kUpdatingStaleAlbumsJob]: boolean;
+    [kFilteringSpotifyLibraryJob]: boolean;
     interval: number;
     nextRun: string;
 }

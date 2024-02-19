@@ -166,6 +166,17 @@ updateStaleAlbumsButton.onclick = async () => {
     updateStaleAlbumsButton.textContent = originalButtonText;
 }
 
+// Filtering Spotify Library
+const filterSpotifyLibraryButton = document.getElementById("filterSpotifyLibraryButton") ?? assert.fail("Bad ID");
+filterSpotifyLibraryButton.onclick = async () => {
+    const originalButtonText = filterSpotifyLibraryButton.textContent;
+    const filterSpotifyLibraryResponse = fetch("/filterSpotifyLibrary", { method: "POST" });
+    filterSpotifyLibraryButton.textContent = "Filtering...";
+    await filterSpotifyLibraryResponse;
+    await updatePage();
+    filterSpotifyLibraryButton.textContent = originalButtonText;
+}
+
 // Buttons for starting/stopping importing Cron Job
 const importJobStartButton = document.getElementById("startImportingJob") ?? assert.fail("Bad ID");
 importJobStartButton.onclick = async () => {

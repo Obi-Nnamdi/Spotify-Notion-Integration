@@ -22,3 +22,6 @@ export interface CronJobSettings {
     interval: number;
     nextRun: string;
 }
+
+// Spotify API globals
+export const spotifyChunkSizeLimit = 20; // max chunk size for most spotify API endpoints

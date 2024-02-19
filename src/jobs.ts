@@ -9,6 +9,7 @@ import cliProgress from 'cli-progress';
 import { Logger } from 'winston';
 import chalk from 'chalk';
 import { chunkArray, arrayIntersect, arrayDifference } from "./helpers";
+import { spotifyChunkSizeLimit } from "./defs";
 
 // For env File
 dotenv.config();
@@ -204,7 +205,7 @@ async function main() {
 async function getAllDatabasePages(database_id: string, showProgressBar: boolean = true): Promise<PageObjectResponse[]> {
   // Create progress bar that's continually updated as we discover we have more page sizes.
   const pageSize = 100; // Max Notion Page size.
-  const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
+  const progressBar = new cliProgress.SingleBar({ clearOnComplete: true, hideCursor: true }, cliProgress.Presets.shades_classic);
   if (showProgressBar) {
     progressBar.start(pageSize, 0);
   }
@@ -552,6 +553,7 @@ async function filterSpotifyLibraryWithNotionPages(
 
   // Get album IDs that we're saving and removing
   const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
+  loggingFunc(`Getting all pages in Notion Database...`);
   const databasePages = await getAllDatabasePages(databaseID);
   const { add, remove } = filterFunction(databasePages);
   // Confirm mutual exclusivity between add and remove
@@ -560,32 +562,67 @@ async function filterSpotifyLibraryWithNotionPages(
   }
 
   // Print spotify library changelist
+  // TODO: should I just automatically get spotify albums?
   if (originalSavedAlbums !== undefined) {
-    const addDiff = originalSavedAlbums.filter(album => !add.includes(album.album.id));
-    const removeDiff = originalSavedAlbums.filter(album => remove.includes(album.album.id));
-    const addStringHeader = addDiff.length > 0 ? `${addDiff.length} albums were added:` : "No albums were added.";
-    const addStringBody = addDiff.map(album => `Added "${createAlbumKeyFromSpotifyAlbum(album.album)}".`).join("\n");
-    const removeStringHeader = removeDiff.length > 0 ? `${removeDiff.length} albums were removed:` : "No albums were removed.";
-    const removeStringBody = removeDiff.map(album => `Removed "${createAlbumKeyFromSpotifyAlbum(album.album)}".`).join("\n");
+    const originalSavedAlbumIDs = originalSavedAlbums.map(album => album.album.id);
 
-    loggingFunc(
-      `${addStringHeader}\n${addStringBody}\n${removeStringHeader}\n${removeStringBody}`
-    );
+    // The new added IDs are the ones that weren't already in the original saved album IDs
+    const newAddedIDs = arrayDifference(add, originalSavedAlbumIDs);
+    // Lookup the new added album IDs
+    const addDiff = await Promise.all(chunkArray([...newAddedIDs], spotifyChunkSizeLimit)
+      .map(chunk => spotify.albums.get(chunk)))
+      .then(chunks => chunks.flat());
+    // The new removed IDs are the ones that were in the original saved album IDs
+    const newRemovedIDs = arrayIntersect(originalSavedAlbumIDs, remove);
+    const removeDiff = originalSavedAlbums.filter(album => newRemovedIDs.includes(album.album.id)).map(savedAlbum => savedAlbum.album);
+
+    // Construct log output
+    const addStringHeader = addDiff.length > 0 ? `${chalk.green(addDiff.length)} albums were ${chalk.green("added")}:` : "No albums were added.";
+    const addStringBody = addDiff.map(album => `Added "${createAlbumKeyFromSpotifyAlbum(album)}".`).join("\n");
+    const removeStringHeader = removeDiff.length > 0 ? `${chalk.red(removeDiff.length)} albums were ${chalk.red("removed")}:` : "No albums were removed.";
+    const removeStringBody = removeDiff.map(album => `Removed "${createAlbumKeyFromSpotifyAlbum(album)}".`).join("\n");
+    loggingFunc(`${addStringHeader}\n${addStringBody}`);
+    loggingFunc(`${removeStringHeader}\n${removeStringBody}`);
   }
   else {
     loggingFunc(`Putting ${add.length} album pages in spotify library, and excluding ${remove.length} albums.`);
   }
 
   // Split add and remove lists into chunks of 50 (spotify API limit)
-  const chunkSize = 50; // spotify API limit
-  const addChunks = chunkArray(add, chunkSize);
-  const removeChunks = chunkArray(remove, chunkSize);
+  const addChunks = chunkArray(add, spotifyChunkSizeLimit);
+  const removeChunks = chunkArray(remove, spotifyChunkSizeLimit);
+
+  // Add Progress Bar
+  const libraryEditingBar = new cliProgress.MultiBar(
+    {
+      format: '{bar} {percentage}% | {name} | {value}/{total}',
+      hideCursor: true,
+      clearOnComplete: true
+    },
+    cliProgress.Presets.shades_classic
+  )
+  // Add "add" and "remove" bars depending on if there's anything to add/remove
+  let addBar: cliProgress.SingleBar | undefined;
+  let removeBar: cliProgress.SingleBar | undefined;
+  if (add.length > 0) {
+    addBar = libraryEditingBar.create(add.length, 0, { name: "adding albums" });
+  }
+  if (remove.length > 0) {
+    removeBar = libraryEditingBar.create(remove.length, 0, { name: "removing albums" });
+  }
 
   // Make spotify API calls
-  const addPromise = Promise.all(addChunks.map(chunk => spotify.currentUser.albums.saveAlbums(chunk)))
-  const removePromise = Promise.all(removeChunks.map(chunk => spotify.currentUser.albums.removeSavedAlbums(chunk)))
+  const addPromise = Promise.all(addChunks.map(async chunk => {
+    await spotify.currentUser.albums.saveAlbums(chunk);
+    addBar?.increment(chunk.length);
+  }))
+  const removePromise = Promise.all(removeChunks.map(async chunk => {
+    await spotify.currentUser.albums.removeSavedAlbums(chunk);
+    removeBar?.increment(chunk.length);
+  }))
   await Promise.all([addPromise, removePromise]);
 
+  libraryEditingBar.stop(); // stop progess bar
   loggingFunc("Finished filtering saved spotify albums.");
 }
 
@@ -603,7 +640,7 @@ async function filterSpotifyLibraryWithNotionPages(
  * @param logger Logger to use to print information about the updating process. If not specified, the console is used.
  * @param originalSavedAlbums Original list of the user's saved albums. If defined, it's used to produce a helpful log output.
  */
-async function filterSpotifyLibraryUsingIncludeColumn(
+export async function filterSpotifyLibraryUsingIncludeColumn(
   spotify: SpotifyApi,
   albumIdColumn: string,
   includeInSpotifyColumn: string,

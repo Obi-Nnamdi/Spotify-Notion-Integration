@@ -5,7 +5,7 @@ import path from 'path';
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
-import { importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
+import { filterSpotifyLibraryUsingIncludeColumn, importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
 import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings } from './defs';
 import { CronJob } from 'cron';
 import { standardFormatDate } from './helpers';
@@ -80,6 +80,7 @@ const albumIdColumn = "Album ID";
 const albumURLColumn = "URL";
 const albumGenreColumn = "Genre"
 const dateDiscoveredColumn = "Date Discovered";
+const includeInSpotifyColumn = "Include in Spotify";
 
 // Middleware
 app.use(express.json()); // parse request bodies as JSON
@@ -173,6 +174,24 @@ app.post('/updateStaleAlbums', expressAsyncHandler(async (req: Request, res: Res
         /* logger = */ logger
     );
     res.status(HttpStatus.OK).send(`Updated Stale Albums!`);
+}))
+
+// POST: Filter's user's spotify library based on the linked notion album database
+app.post('/filterSpotifyLibrary', expressAsyncHandler(async (req: Request, res: Response) => {
+    // TODO: Automatically retrieve albums if we haven't gotten them yet
+    if (spotify === undefined) {
+        logger.error("ERROR: Internal spotify access token wasn't populated!");
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).send("Internal Server Error: Spotify Access Token Not Populated");
+        return;
+    }
+    await filterSpotifyLibraryUsingIncludeColumn(
+        spotify,
+        albumIdColumn,
+        includeInSpotifyColumn,
+        /* logger = */ logger,
+        /* originalSavedAlbums = */ cachedSavedAlbums
+    )
+    res.status(HttpStatus.OK).send(`Updated Spotify Album Library!`);
 }))
 
 // GET: Retrieves the user token for the currently signed in user.
@@ -371,7 +390,7 @@ async function getSavedUserAlbums(showProgressBar = true): Promise<SavedAlbum[]>
     const diagnosticQuery = await spotify.currentUser.albums.savedAlbums(diagnosticQueryAlbumLimit);
     const totalAlbums = diagnosticQuery.total;
 
-    const progressBar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
+    const progressBar = new cliProgress.SingleBar({ clearOnComplete: true, hideCursor: true }, cliProgress.Presets.shades_classic);
     if (showProgressBar) {
         progressBar.start(totalAlbums, 0);
     }

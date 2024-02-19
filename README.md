@@ -11,6 +11,8 @@
         - [Installing OpenSSL](#installing-openssl)
         - [Creating the Certificate](#creating-the-certificate)
       - [Using the Web App](#using-the-web-app)
+      - [Logging](#logging)
+  - [Scheduling Cron Jobs](#scheduling-cron-jobs)
 
 
 This project links your Spotify album library to a Notion database, and allows you to perform some operations on any album database you may have in Notion.
@@ -118,5 +120,25 @@ From there, click the "Load Spotify Albums" button to load the saved albums from
 
 After loading the albums, you can click the "Import Albums into Notion" button to import the loaded albums into your Notion database or click the "Sign Out" button to sign out of the app.
 
-<!-- TODO: Add "logging" section -->
-<!-- TODO: Add explanations about the different types of Cron Jobs -->
+
+#### Logging
+The web app will automatically log the output of its servers to the console and to files in the `logs` directory. If you want to log the output of the web app to [Logtail/Better Stack](https://betterstack.com/logs), add the following line to your `.env` file:
+
+```
+LOGTAIL_SOURCE_TOKEN={Your Logtail Source Token}
+```
+
+## Scheduling Cron Jobs
+Much of the usefulness of this project comes from the ability to schdeul jobs to run on a regular basis. By scheduling these jobs, you can log in to the web app once and let the app continually run integrations between your Spotify Library and Notion Album Database.
+
+To use these jobs:
+1. follow the [web app instructions](#importing-spotify-albums-into-notion-web-app) to start the web app.
+2. After starting the web app, sign into Spotify (you don't need to load any albums).
+3. From there, you can schedule the following jobs using the form on the webpage:
+   - Importing Spotify Albums into Notion
+   - Updating outdated/stale albums in your Notion Album Database
+   - Filtering your Spotify Library based on your Notion Album Database 
+
+4. After choosing your desired jobs, click the "Start Cron Jobs" button to start the jobs.
+
+To stop the jobs, click the "Stop Cron Jobs" button. You can also see the current job settings on the web app page.

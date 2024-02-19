@@ -62,7 +62,7 @@ const cronJobFlags = new Map<string, boolean>([
     [kImportingJob, true],
     [kUpdatingStaleAlbumsJob, false]
 ]);
-const cronJobInterval = 1; // minutes
+const cronJobInterval = 15; // minutes
 const albumDBJobs = new CronJob(
     `0-59/${cronJobInterval} * * * *`, // Every 15 minutes
     // "* * * * * *", // Every second

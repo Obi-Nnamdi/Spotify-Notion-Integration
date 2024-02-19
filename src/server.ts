@@ -18,6 +18,7 @@ import { LogtailTransport } from '@logtail/winston';
 import winston from 'winston';
 // Using Chalk v4.1.2 on purpose: it seems to be the most recent one that works with CommonJS.
 import chalk from 'chalk';
+import * as os from 'node:os'
 
 // For env File
 dotenv.config();
@@ -269,6 +270,7 @@ app.get('/cronJobSettings', (req: Request, res: Response) => {
 });
 
 // Try and start an https server using secure credentials if we have them
+const ipAdress = os.networkInterfaces().en0?.filter(i => i.family === "IPv4")[0]?.address;
 try {
     const certOptions = {
         key: fs.readFileSync(path.resolve("./cert/key.pem")),
@@ -277,6 +279,9 @@ try {
     };
     https.createServer(certOptions, app).listen(port, () => {
         logger.info(`Server is listening at https://localhost:${port}`);
+        if (ipAdress !== undefined) {
+            logger.info(`Server is also listening at https://${ipAdress}:${port}`);
+        }
     });
 }
 catch (Error) {
@@ -284,6 +289,9 @@ catch (Error) {
     logger.info("Unable to start https server, moving to http server...");
     app.listen(port, () => {
         logger.info(`Server is listening at http://localhost:${port}`);
+        if (ipAdress !== undefined) {
+            logger.info(`Server is also listening at http://${ipAdress}:${port}`);
+        }
     });
 }
 /**

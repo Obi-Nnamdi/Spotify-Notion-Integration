@@ -191,7 +191,7 @@ app.post('/filterSpotifyLibrary', expressAsyncHandler(async (req: Request, res: 
         albumIdColumn,
         includeInSpotifyColumn,
         /* logger = */ logger,
-        /* originalSavedAlbums = */ cachedSavedAlbums
+        /* originalSavedAlbums = */ cachedSavedAlbums.length > 0 ? cachedSavedAlbums : undefined
     )
     res.status(HttpStatus.OK).send(`Updated Spotify Album Library!`);
 }))

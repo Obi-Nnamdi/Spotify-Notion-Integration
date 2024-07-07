@@ -660,11 +660,18 @@ export async function filterSpotifyLibraryUsingIncludeColumn(
     // If page's formula evaluates to true, add its album IDs to the add list, and vice versa for the remove list.
     notionAlbumPages.forEach(page => {
       const includeProperty = getFormulaPropertyAsBoolean(page, includeInSpotifyColumn);
+      const albumIDs = getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn)
+
+      // Before continuing, skip the album if its album ID is completely empty
+      if (albumIDs.join().trim() === "") {
+        return
+      }
+
       if (includeProperty) {
-        add.push(...getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn));
+        add.push(...albumIDs);
       }
       else {
-        remove.push(...getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn));
+        remove.push(...albumIDs);
       }
     })
     return { add, remove };

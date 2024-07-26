@@ -5,6 +5,7 @@ import { strict as assert } from "assert";
 import { strict } from 'assert';
 import { DateTime } from 'luxon';
 import { main } from "./jobs";
+import { SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
 
 const albumArt = require("album-art");
 /**
@@ -308,4 +309,42 @@ export function createAlbumKeyFromSpotifyAlbum(album: Album) {
         album.name,
         getArtistStringFromAlbum(album)
     );
+}
+
+/**
+ * Gets the total runtime of a spotify Album in milliseconds.
+ * 
+ * @param album Album to get runtime from.
+ * @returns length of Album in milliseconds.
+ */
+function getAlbumRuntime(album: Album): number {
+    return album.tracks.items.reduce((prev, current) => current.duration_ms + prev, 0)
+}
+
+/**
+ * Determines the type of an Album based on its runtime and number of tracks.
+ * 
+ * @param album Album to determine type of
+ * @returns Enum value corresponding to the type of `album`.
+ */
+export function determineAlbumType(album: Album): SpotifyAlbumType {
+    // If the album isn't classified as a 'single', it's an album.
+    const albumType = album.album_type
+    if (albumType === "album" || albumType === "compilation") {
+        return SpotifyAlbumType.ALBUM
+    }
+
+    // Now, test if the album is an EP or not, going by these rules:
+    // The release has four to six (4-6) tracks.
+    // The release is under 30 minutes in duration.
+    // From https://community.spotify.com/t5/Spotify-for-Developers/How-to-tell-if-a-release-is-an-EP/m-p/5328488/highlight/true#M3942
+    const maxEPLen = 30 * 60 * 1000 // milliseconds
+    const minEPTracks = 4
+    const maxEPTracks = 6
+    if ((album.total_tracks >= minEPTracks && album.total_tracks <= maxEPTracks)
+        && getAlbumRuntime(album) <= maxEPLen) {
+        return SpotifyAlbumType.EP
+    }
+
+    return SpotifyAlbumType.SINGLE
 }

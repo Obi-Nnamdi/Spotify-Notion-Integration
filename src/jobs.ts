@@ -8,8 +8,8 @@ import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
 import { Logger } from 'winston';
 import chalk from 'chalk';
-import { chunkArray, arrayIntersect, arrayDifference } from "./helpers";
-import { spotifyChunkSizeLimit } from "./defs";
+import { chunkArray, arrayIntersect, arrayDifference, determineAlbumType } from "./helpers";
+import { SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
 import { getFullPages, getSpotifyAlbumIDsFromNotionPage, createAlbumKey, getFullPlainText, getTitleField, getRichTextField, getArtistStringFromAlbum, constructNotionTextContentBlock, getTitleFieldAsString, getRichTextFieldAsString, getURLFieldAsString, makeStringFromAlbumIDs, createAlbumKeyFromSpotifyAlbum, getFormulaPropertyAsBoolean, getAlbumArtwork, getSelectFieldAsString } from "./helpers";
 
 // For env File
@@ -311,6 +311,19 @@ export async function importSavedSpotifyAlbums(
     // This is because right now (Winter 2024), album genres aren't really populated at all, with most of the genre information coming from the artist
     // See https://community.spotify.com/t5/Spotify-for-Developers/Getting-album-not-getting-genre/td-p/5093156
     const albumGenres = album.genres;
+
+    // Add genre information based on Album Type (EP, Single, and Compilation)
+    const spotifyAlbumType: SpotifyAlbumType = determineAlbumType(album)
+    if (spotifyAlbumType === SpotifyAlbumType.SINGLE) {
+      albumGenres.push("Single")
+    }
+    else if (spotifyAlbumType === SpotifyAlbumType.EP) {
+      albumGenres.push("EP")
+    }
+
+    if (album.album_type === "compilation") {
+      albumGenres.push("Compilation")
+    }
     // Per spotify API reference, widest album artwork is always listed first
     const albumArtwork = album.images[0]?.url ?? assert.fail("No album artwork");
 

@@ -27,3 +27,9 @@ export interface CronJobSettings {
 
 // Spotify API globals
 export const spotifyChunkSizeLimit = 20; // max chunk size for most spotify API endpoints
+
+// Enum for the different types of "album" in the spotify interface.
+// NOTE: "compliation" isn't here since it's a bit of a gray area and spotify helps us out there anyways.
+export enum SpotifyAlbumType {
+    ALBUM, EP, SINGLE
+}

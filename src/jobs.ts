@@ -628,11 +628,11 @@ async function filterSpotifyLibraryWithNotionPages(
 
   // Make spotify API calls
   const addPromise = Promise.all(addChunks.map(async chunk => {
-    await spotify.currentUser.albums.saveAlbums(chunk);
+    await addSavedAlbums(spotify, chunk);
     addBar?.increment(chunk.length);
   }))
   const removePromise = Promise.all(removeChunks.map(async chunk => {
-    await spotify.currentUser.albums.removeSavedAlbums(chunk);
+    await removeSavedAlbums(spotify, chunk);
     removeBar?.increment(chunk.length);
   }))
   await Promise.all([addPromise, removePromise]);
@@ -1058,4 +1058,71 @@ if (require.main === module) {
       console.error(err);
       process.exit(1);
     });
+}
+
+
+/**
+ * Add albums to user's spotify library.
+ * 
+ * @param spotify Spotify API Instance
+ * @param albumIDs album IDs to add to user's saved library. Limit of 50.
+ */
+async function addSavedAlbums(spotify: SpotifyApi, albumIDs: string[]): Promise<void> {
+  return changeUserAlbums(spotify, albumIDs, "PUT");
+}
+
+
+/**
+ * Delete albums from user's spotify library.
+ * 
+ * @param spotify Spotify API Instance
+ * @param albumIDs album IDs to remove from user's saved library. Limit of 50.
+ */
+async function removeSavedAlbums(spotify: SpotifyApi, albumIDs: string[]): Promise<void> {
+  return changeUserAlbums(spotify, albumIDs, "DELETE");
+}
+/**
+ * Uses fetch API to change albums in signed-in user's library.
+ * 
+ * @param spotify Spotify API Instance
+ * @param albumIDs album IDs to change status in user's saved library. Limit of 50.
+ * @param method HTTP method to use when calling endpoint. "PUT" addds albums, "DELETE" removes albums.
+ */
+async function changeUserAlbums(spotify: SpotifyApi, albumIDs: string[], method: "PUT" | "DELETE"): Promise<void> {
+  // Get access token
+  const token = (await spotify.getAccessToken())?.access_token;
+  if (token === undefined) {
+    throw Error("Unpopulated access token in Spotify API instance.");
+  }
+
+  const myHeaders = new Headers();
+  myHeaders.append("Content-Type", "application/json");
+  myHeaders.append("Authorization", `Bearer ${token}`);
+
+  // Make request body
+  const requestBody = {
+    "ids": albumIDs
+  };
+
+  const requestOptions: {
+    redirect: "follow" | "error" | "manual",
+    method: "PUT" | "DELETE",
+    headers: Headers,
+    body: string;
+  } = {
+    redirect: "follow",
+    method: method,
+    headers: myHeaders,
+    body: JSON.stringify(requestBody),
+  };
+
+  // Make request
+  try {
+    // There should be no API response.
+    const response = await fetch("https://api.spotify.com/v1/me/albums", requestOptions);
+    const result = await response.text();
+  } catch (error) {
+    // Immediately throw whatever error we get.
+    throw (error);
+  };
 }

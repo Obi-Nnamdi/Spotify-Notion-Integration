@@ -8,7 +8,7 @@ import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { filterSpotifyLibraryUsingIncludeColumn, importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
 import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings, kFilteringSpotifyLibraryJob } from './defs';
 import { CronJob } from 'cron';
-import { standardFormatDate } from './helpers';
+import { getSpotifyAlbumIDsFromNotionPage, standardFormatDate } from './helpers';
 import cliProgress from 'cli-progress';
 import { DateTime } from 'luxon';;
 import * as fs from 'node:fs';
@@ -19,6 +19,8 @@ import winston from 'winston';
 // Using Chalk v4.1.2 on purpose: it seems to be the most recent one that works with CommonJS.
 import chalk from 'chalk';
 import * as os from 'node:os'
+import { isFullPage } from '@notionhq/client';
+import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
 
 // For env File
 dotenv.config();
@@ -82,6 +84,7 @@ const albumIdColumn = "Album ID";
 const albumURLColumn = "URL";
 const albumGenreColumn = "Genre"
 const dateDiscoveredColumn = "Date Discovered";
+const albumDurationColumn = "Duration";
 const includeInSpotifyColumn = "Include in Spotify";
 
 // Middleware
@@ -159,6 +162,7 @@ app.post('/importAlbums', expressAsyncHandler(async (req: Request, res: Response
         albumURLColumn,
         albumGenreColumn,
         dateDiscoveredColumn,
+        albumDurationColumn,
         /* logger = */ logger
     );
     res.status(HttpStatus.OK).send(`Imported ${cachedSavedAlbums.length} Albums Successfully!`);
@@ -294,6 +298,30 @@ catch (Error) {
         }
     });
 }
+
+/**
+ * Endpoint that should be triggered off of a Notion webhook automation with "Album ID" as the property name.
+ * TODO: Incomplete. Lots of infrastructure required for this.
+ */
+app.post('/playAlbum', (req: Request, res: Response) => {
+    // Make sure we actually got a page from the post body.
+    if (!isFullPage(req.body.data)) {
+        res.sendStatus(HttpStatus.BAD_REQUEST);
+        return;
+    }
+    // Get the first album ID from the sent notion page and play it.
+    const pageData = req.body.data as PageObjectResponse;
+    const albumIds = getSpotifyAlbumIDsFromNotionPage(pageData, albumIdColumn);
+    if (albumIds.length == 0) {
+        res.sendStatus(HttpStatus.BAD_REQUEST);
+        return;
+    }
+    const playedAlbumID = albumIds[0];
+
+    logger.info(`Playing Album ID: ${chalk.blue(playedAlbumID)}`);
+    res.sendStatus(HttpStatus.OK);
+})
+
 /**
  * Job that imports saved spotify albums and puts them into the notion database.
  */
@@ -321,6 +349,7 @@ async function runImportingJob() {
             albumURLColumn,
             albumGenreColumn,
             dateDiscoveredColumn,
+            albumDurationColumn,
             /* logger = */ logger
         );
     }

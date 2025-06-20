@@ -1,6 +1,6 @@
 import { isFullPage } from "@notionhq/client";
 import { PageObjectResponse, QueryDatabaseResponse, RichTextItemResponse } from "@notionhq/client/build/src/api-endpoints";
-import { Album } from "@spotify/web-api-ts-sdk";
+import { Album, SimplifiedTrack, SpotifyApi } from "@spotify/web-api-ts-sdk";
 import { strict as assert } from "assert";
 import { strict } from 'assert';
 import { DateTime } from 'luxon';
@@ -347,4 +347,27 @@ export function determineAlbumType(album: Album): SpotifyAlbumType {
     }
 
     return SpotifyAlbumType.SINGLE
+}
+
+/**
+ * Gets all tracks from a Spotify Album, accounting for pagination limitations of Spotify API.
+ * @param album Album to get all tracks from.
+ * @param spotify SpotifyApi instance to use to get all tracks.
+ * @returns SimplifiedTrack[]
+ */
+export async function getAllAlbumTracks(album: Album, spotify: SpotifyApi): Promise<SimplifiedTrack[]> {
+    const totalTracks = album.total_tracks
+    // Simple if we know the album has only one page of tracks
+    if (totalTracks === album.tracks.total) {
+        return album.tracks.items
+    }
+
+    // Ingest all album tracks by requesting as many as it takes until we're at the limit
+    const trackPagePromises: Promise<SimplifiedTrack[]>[] = []
+    for (let i = 0; i < Math.ceil(totalTracks / spotifyChunkSizeLimit); i++) {
+        trackPagePromises.push(spotify.albums.tracks(album.id, undefined, spotifyChunkSizeLimit, i * spotifyChunkSizeLimit)
+            .then(page => page.items));
+    }
+
+    return (await Promise.all(trackPagePromises)).flat()
 }

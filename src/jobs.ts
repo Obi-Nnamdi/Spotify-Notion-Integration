@@ -8,7 +8,7 @@ import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
 import { Logger } from 'winston';
 import chalk from 'chalk';
-import { chunkArray, arrayIntersect, arrayDifference, determineAlbumType } from "./helpers";
+import { chunkArray, arrayIntersect, arrayDifference, determineAlbumType, getAllAlbumTracks } from "./helpers";
 import { SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
 import { getFullPages, getSpotifyAlbumIDsFromNotionPage, createAlbumKey, getFullPlainText, getTitleField, getRichTextField, getArtistStringFromAlbum, constructNotionTextContentBlock, getTitleFieldAsString, getRichTextFieldAsString, getURLFieldAsString, makeStringFromAlbumIDs, createAlbumKeyFromSpotifyAlbum, getFormulaPropertyAsBoolean, getAlbumArtwork, getSelectFieldAsString } from "./helpers";
 
@@ -30,7 +30,6 @@ const notion = new Client({
 // TODO: Abstract out into other files
 // TODO: Auto-Populate Genres
 // TODO: Create "main" file and choose what to run there.
-// TODO: Auto-remove albums with ratings of < 2.
 export async function main() {
   // Get all pages in Album Database
   const databaseID = process.env.DATABASE_ID ?? assert.fail("No Database ID");
@@ -267,6 +266,7 @@ export async function importSavedSpotifyAlbums(
   albumURLColumn: string,
   albumGenreColumn: string,
   dateDiscoveredColumn: string,
+  albumDurationColumn: string,
   logger?: Logger | undefined
 ): Promise<void> {
   const loggingFunc = logger?.verbose ?? console.log;
@@ -299,7 +299,7 @@ export async function importSavedSpotifyAlbums(
           getArtistStringFromAlbum(savedAlbum.album)),
       ),
   );
-  loggingFunc(`Actually Importing ${albumsToImport.length} new albums.`);
+  loggingFunc(`Importing ${albumsToImport.length} new albums.`);
 
   // Import all new spotify albums
   const notionUpdatePromises = albumsToImport.map(async savedAlbum => {
@@ -307,6 +307,9 @@ export async function importSavedSpotifyAlbums(
     const artistNames = album.artists.map(artist => artist.name);
     const artistText = artistNames.join(", ");
     const albumURL = album.external_urls.spotify;
+    const albumTracks = await getAllAlbumTracks(album, spotify)
+    const albumDuration = albumTracks.reduce((duration, track) => duration + track.duration_ms, 0)
+
     // TODO: change the way album genres are retrieved by instead using the artist's genre (maybe have some sort of switch/paramater for this)
     // This is because right now (Winter 2024), album genres aren't really populated at all, with most of the genre information coming from the artist
     // See https://community.spotify.com/t5/Spotify-for-Developers/Getting-album-not-getting-genre/td-p/5093156
@@ -354,6 +357,9 @@ export async function importSavedSpotifyAlbums(
           date: {
             start: savedAlbum.added_at
           }
+        },
+        [albumDurationColumn]: {
+          number: albumDuration
         }
       },
       // Add cover and icon

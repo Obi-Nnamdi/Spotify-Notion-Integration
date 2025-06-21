@@ -135,7 +135,7 @@ export function getTitleFieldAsString(page: PageObjectResponse, propertyName: st
  * @returns Number from `page`'s number field called `propertyName`, or undefined if `propertyName` is empty in `page`.
  * @throws AssertionError if `page` has no property called `propertyName`, or `propertyName` is not a number field.
  */
-function getNumberField(page: PageObjectResponse, propertyName: string): number | undefined {
+export function getNumberField(page: PageObjectResponse, propertyName: string): number | undefined {
     const numberProperty = page.properties[propertyName] ?? assert.fail();
     assert(
         numberProperty.type === "number",
@@ -370,4 +370,7 @@ export async function getAllAlbumTracks(album: Album, spotify: SpotifyApi): Prom
     }
 
     return (await Promise.all(trackPagePromises)).flat()
+}
+export async function getAlbumDuration(album: Album, spotify: SpotifyApi) {
+    return (await getAllAlbumTracks(album, spotify)).reduce((duration, track) => duration + track.duration_ms, 0);
 }

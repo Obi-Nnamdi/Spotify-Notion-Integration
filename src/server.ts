@@ -5,7 +5,7 @@ import path from 'path';
 import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
-import { filterSpotifyLibraryUsingIncludeColumn, importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
+import { backfillAlbumDurations, filterSpotifyLibraryUsingIncludeColumn, importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
 import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings, kFilteringSpotifyLibraryJob } from './defs';
 import { CronJob } from 'cron';
 import { getSpotifyAlbumIDsFromNotionPage, standardFormatDate } from './helpers';
@@ -198,6 +198,23 @@ app.post('/filterSpotifyLibrary', expressAsyncHandler(async (req: Request, res: 
         /* originalSavedAlbums = */ cachedSavedAlbums.length > 0 ? cachedSavedAlbums : undefined
     )
     res.status(HttpStatus.OK).send(`Updated Spotify Album Library!`);
+}))
+
+app.post('/backfillNotionDatabaseProperties', expressAsyncHandler(async (req: Request, res: Response) => {
+    // TODO: Make use of req parameters to only backfill what the user wants.
+    if (spotify === undefined) {
+        logger.error("ERROR: Internal spotify access token wasn't populated!");
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).send("Internal Server Error: Spotify Access Token Not Populated");
+        return;
+    }
+    await backfillAlbumDurations(
+        spotify,
+        notionDatabaseID,
+        albumIdColumn,
+        albumDurationColumn,
+        /* logger = */ logger
+    )
+    res.status(HttpStatus.OK).send(`Backfilled Notion Album Library!`);
 }))
 
 // GET: Retrieves the user token for the currently signed in user.

@@ -177,6 +177,17 @@ filterSpotifyLibraryButton.onclick = async () => {
     filterSpotifyLibraryButton.textContent = originalButtonText;
 }
 
+const backfillNotionDatabasePropertiesButton = document.getElementById("backfillNotionDatabasePropertiesButton") ?? assert.fail("Bad ID");
+backfillNotionDatabasePropertiesButton.onclick = async () => {
+    // TODO: Abstract this logic out into a factory function.
+    const originalButtonText = backfillNotionDatabasePropertiesButton.textContent;
+    const backfillNotionDatabasePropertiesResponse = fetch("/backfillNotionDatabaseProperties", { method: "POST" });
+    backfillNotionDatabasePropertiesButton.textContent = "Backfilling...";
+    await backfillNotionDatabasePropertiesResponse;
+    await updatePage();
+    backfillNotionDatabasePropertiesButton.textContent = originalButtonText;
+}
+
 // Buttons for starting/stopping importing Cron Job
 const importJobStartButton = document.getElementById("startImportingJob") ?? assert.fail("Bad ID");
 importJobStartButton.onclick = async () => {

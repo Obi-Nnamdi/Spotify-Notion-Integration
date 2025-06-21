@@ -8,9 +8,10 @@ import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
 import { Logger } from 'winston';
 import chalk from 'chalk';
-import { chunkArray, arrayIntersect, arrayDifference, determineAlbumType, getAllAlbumTracks } from "./helpers";
+import { chunkArray, arrayIntersect, arrayDifference, determineAlbumType, getAllAlbumTracks, getAlbumDuration, getNumberField } from "./helpers";
 import { SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
 import { getFullPages, getSpotifyAlbumIDsFromNotionPage, createAlbumKey, getFullPlainText, getTitleField, getRichTextField, getArtistStringFromAlbum, constructNotionTextContentBlock, getTitleFieldAsString, getRichTextFieldAsString, getURLFieldAsString, makeStringFromAlbumIDs, createAlbumKeyFromSpotifyAlbum, getFormulaPropertyAsBoolean, getAlbumArtwork, getSelectFieldAsString } from "./helpers";
+import { get } from "node:http";
 
 // For env File
 dotenv.config();
@@ -255,6 +256,7 @@ async function getAllDatabasePages(database_id: string, showProgressBar: boolean
  * @param albumURLColumn Name of property in notion database that stores album URL information. Should be "rich text" type.
  * @param albumGenreColumn Name of property in notion database that stores album Genre column. Should be multi-select type.
  * @param dateDiscoveredColumn Name of property in notion database that stores date discovered information. Should be "Date" type.
+ * @param albumDurationColumn Name of property in notion database that stores album duration information. Should be "Number" type.
  * @param logger Logger to use to print information about the importing process. If not specified, console.log is used.
  */
 export async function importSavedSpotifyAlbums(
@@ -307,8 +309,7 @@ export async function importSavedSpotifyAlbums(
     const artistNames = album.artists.map(artist => artist.name);
     const artistText = artistNames.join(", ");
     const albumURL = album.external_urls.spotify;
-    const albumTracks = await getAllAlbumTracks(album, spotify)
-    const albumDuration = albumTracks.reduce((duration, track) => duration + track.duration_ms, 0)
+    const albumDuration = await getAlbumDuration(album, spotify);
 
     // TODO: change the way album genres are retrieved by instead using the artist's genre (maybe have some sort of switch/paramater for this)
     // This is because right now (Winter 2024), album genres aren't really populated at all, with most of the genre information coming from the artist
@@ -375,7 +376,7 @@ export async function importSavedSpotifyAlbums(
       }
     }
     // add URL separately because of type checking issues
-    notion.pages.create(notionAPIParams);
+    // notion.pages.create(notionAPIParams);
     loggingFunc(`Imported album "${album.name}".`);
   });
 
@@ -1131,4 +1132,70 @@ async function changeUserAlbums(spotify: SpotifyApi, albumIDs: string[], method:
     // Immediately throw whatever error we get.
     throw (error);
   };
+}
+
+/**
+ * /**
+ * Backfills album durations for Notion database pages that have an album ID but no duration.
+ * 
+ * @param spotify Spotify API Instance
+ * @param notion_database_id ID for Notion Database
+ * @param albumIdColumn Column name in Notion Database for Album ID.
+ * @param albumDurationColumn Column name in Notion Database for Album Duration
+ * @param logger 
+ */
+export async function backfillAlbumDurations(
+  spotify: SpotifyApi,
+  notion_database_id: string,
+  albumIdColumn: string,
+  albumNameColumn: string,
+  albumDurationColumn: string,
+  logger?: Logger | undefined
+): Promise<void> {
+  const loggingFunc = logger?.verbose ?? console.log;
+  loggingFunc("Backfilling album durations...")
+  const existingDatabasePages = await getAllDatabasePages(notion_database_id, /*showProgressBar=*/ false);
+
+  const validDatabasePages = existingDatabasePages.filter(page => {
+    // Filter out albums with no ID / already filled durations
+    const albumID = getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn).filter(id => id !== "")[0];
+    if (albumID === undefined) {
+      return false;
+    }
+    if (getNumberField(page, albumDurationColumn) !== undefined) {
+      return false;
+    }
+    return true;
+  })
+
+  const validDatabaseAlbumIDs = validDatabasePages.map(page => getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn).filter(id => id !== "")[0] ?? assert.fail())
+  const spotifyAlbums = (await Promise.all(chunkArray(validDatabaseAlbumIDs, spotifyChunkSizeLimit).map(chunk => spotify.albums.get(chunk)))).flat();
+
+  loggingFunc("Got all spotify albums.")
+  // TODO: Error here - "Client network socket disconnected before secure TLS connection was established"
+  const backfillPromises = spotifyAlbums.map((album, index) => {
+    const notionPage = validDatabasePages[index] ?? assert.fail();
+
+    return getAlbumDuration(album, spotify).then(albumDuration => {
+      const albumName = getTitleFieldAsString(notionPage, albumNameColumn)
+      loggingFunc(`Album ${albumName} has duration ${albumDuration} ms.`)
+
+      return notion.pages.update({
+        page_id: notionPage.id,
+        properties: {
+          [albumDurationColumn]: {
+            number: albumDuration
+          }
+        }
+
+      })
+
+    }
+    )
+  })
+
+  loggingFunc("Got all album durations and updated Notion pages.")
+
+  await Promise.all(backfillPromises);
+
 }

@@ -8,8 +8,8 @@ import inquirer from 'inquirer';
 import cliProgress from 'cli-progress';
 import { Logger } from 'winston';
 import chalk from 'chalk';
-import { chunkArray, arrayIntersect, arrayDifference, determineAlbumType, getAllAlbumTracks, getAlbumDuration, getNumberField } from "./helpers";
-import { NotionAlbumDBColumnNames, SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
+import { chunkArray, arrayIntersect, arrayDifference, determineAlbumType, getAllAlbumTracks, getAlbumDuration, getNumberField, getAllArtistGenresFromAlbum, getNotionGenresFromAlbum, convertSpotifyGenresIntoNotionGenres } from "./helpers";
+import { defaultGenreConversionModel, NotionAlbumDBColumnNames, SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
 import { getFullPages, getSpotifyAlbumIDsFromNotionPage, createAlbumKey, getFullPlainText, getTitleField, getRichTextField, getArtistStringFromAlbum, constructNotionTextContentBlock, getTitleFieldAsString, getRichTextFieldAsString, getURLFieldAsString, makeStringFromAlbumIDs, createAlbumKeyFromSpotifyAlbum, getFormulaPropertyAsBoolean, getAlbumArtwork, getSelectFieldAsString } from "./helpers";
 import { get } from "node:http";
 
@@ -311,10 +311,10 @@ export async function importSavedSpotifyAlbums(
     const albumURL = album.external_urls.spotify;
     const albumDuration = await getAlbumDuration(album, spotify);
 
-    // TODO: change the way album genres are retrieved by instead using the artist's genre (maybe have some sort of switch/paramater for this)
-    // This is because right now (Winter 2024), album genres aren't really populated at all, with most of the genre information coming from the artist
-    // See https://community.spotify.com/t5/Spotify-for-Developers/Getting-album-not-getting-genre/td-p/5093156
-    const albumGenres = album.genres;
+    // Infer album genre (using artists)
+    const spotifyArtistGenres = await getAllArtistGenresFromAlbum(album, spotify);
+    const albumGenres = convertSpotifyGenresIntoNotionGenres(spotifyArtistGenres, defaultGenreConversionModel)
+    loggingFunc(`Genre Inferring Result:\nAlbum: ${album.name}\nSpotify Genres: ${spotifyArtistGenres.join(", ")}\nNotion Genres: ${albumGenres.join(", ")}`)
 
     // Add genre information based on Album Type (EP, Single, and Compilation)
     const spotifyAlbumType: SpotifyAlbumType = determineAlbumType(album)
@@ -376,7 +376,7 @@ export async function importSavedSpotifyAlbums(
       }
     }
     // add URL separately because of type checking issues
-    // notion.pages.create(notionAPIParams);
+    notion.pages.create(notionAPIParams);
     loggingFunc(`Imported album "${album.name}".`);
   });
 

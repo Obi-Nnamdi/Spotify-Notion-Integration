@@ -5,7 +5,7 @@ import { strict as assert } from "assert";
 import { strict } from 'assert';
 import { DateTime } from 'luxon';
 import { main } from "./jobs";
-import { SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
+import { GenreConversionModel, isForwardGenreConversionRule, SpotifyAlbumType, spotifyChunkSizeLimit, testMatchable } from "./defs";
 
 const albumArt = require("album-art");
 /**
@@ -312,12 +312,13 @@ export function createAlbumKeyFromSpotifyAlbum(album: Album) {
 }
 
 /**
- * Gets the total runtime of a spotify Album in milliseconds.
+ * Gets the total runtime of a spotify Album in milliseconds. 
+ * Note that this is not fully accurate for longer albums that have more tracks than can fit in a single page of the Spotify Api.
  * 
  * @param album Album to get runtime from.
  * @returns length of Album in milliseconds.
  */
-function getAlbumRuntime(album: Album): number {
+function getFastAlbumRuntime(album: Album): number {
     return album.tracks.items.reduce((prev, current) => current.duration_ms + prev, 0)
 }
 
@@ -342,7 +343,7 @@ export function determineAlbumType(album: Album): SpotifyAlbumType {
     const minEPTracks = 4
     const maxEPTracks = 6
     if ((album.total_tracks >= minEPTracks && album.total_tracks <= maxEPTracks)
-        && getAlbumRuntime(album) <= maxEPLen) {
+        && getFastAlbumRuntime(album) <= maxEPLen) {
         return SpotifyAlbumType.EP
     }
 
@@ -373,4 +374,55 @@ export async function getAllAlbumTracks(album: Album, spotify: SpotifyApi): Prom
 }
 export async function getAlbumDuration(album: Album, spotify: SpotifyApi) {
     return (await getAllAlbumTracks(album, spotify)).reduce((duration, track) => duration + track.duration_ms, 0);
+}
+
+export async function getAllArtistGenresFromAlbum(album: Album, spotify: SpotifyApi): Promise<string[]> {
+    // TODO: Handle complex case where we're trying to infer the genre of a compliation album (written by "Various Artists").
+    // Would likely involve iterating through all songs and getting those artists (but even then the genres might be too broad).
+    if (album.album_type === "compilation") {
+        return []
+    }
+
+    // Get all artists on the album and get their information
+    const artistIDs = album.artists.map(artist => artist.id)
+    const albumArtists = await Promise.all(artistIDs.map(artistID => spotify.artists.get(artistID)))
+
+    // Get all our artists genres, flatten, then deduplicate.
+    const allArtistGenres = albumArtists.flatMap(artist => artist.genres)
+    return Array.from(new Set(allArtistGenres))
+}
+
+export function convertSpotifyGenresIntoNotionGenres(genres: string[], conversionModel?: Readonly<GenreConversionModel>): string[] {
+    // The absence of a rules object means everything passes through like normal.
+    if (conversionModel === undefined) {
+        return genres;
+    }
+
+    // Use rules object to test all produced spotify genres.
+    const inferredNotionGenres: Set<string> = new Set()
+
+    for (const spotifyGenre of genres) {
+        for (const expression of conversionModel.expressions) {
+            if (isForwardGenreConversionRule(expression)) {
+                // One spotify matchable -> Many notion genres, so add all of them
+                if (testMatchable(expression.spotifyGenre, spotifyGenre)) {
+                    expression.notionGenres.forEach(notionGenre => inferredNotionGenres.add(notionGenre))
+                }
+            }
+
+            else {
+                // Many spotify genre matchables -> One notion genre, so test all of them
+                if (expression.spotifyGenres.some(matchable => testMatchable(matchable, spotifyGenre))) {
+                    inferredNotionGenres.add(expression.notionGenre)
+                }
+            }
+        }
+    }
+    return Array.from(inferredNotionGenres)
+}
+
+export async function getNotionGenresFromAlbum(album: Album, spotify: SpotifyApi,
+    conversionModel?: Readonly<GenreConversionModel>): Promise<string[]> {
+    return convertSpotifyGenresIntoNotionGenres(
+        await getAllArtistGenresFromAlbum(album, spotify), conversionModel)
 }

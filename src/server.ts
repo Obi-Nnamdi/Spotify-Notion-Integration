@@ -467,6 +467,10 @@ async function runAlbumDBJobs() {
         await runSpotifyLibraryFilteringJob();
     }
     logger.info(`Done! Jobs will next run at ${standardFormatDate(albumDBJobs.nextDate())}`);
+    // Send a heartbeat to logtail for monitoring.
+    if (process.env.LOGTAIL_CRON_HEARTBEAT_URL !== undefined) {
+        fetch(process.env.LOGTAIL_CRON_HEARTBEAT_URL);
+    }
 }
 
 /**

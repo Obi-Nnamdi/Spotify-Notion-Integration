@@ -142,3 +142,6 @@ To use these jobs:
 4. After choosing your desired jobs, click the "Start Cron Jobs" button to start the jobs.
 
 To stop the jobs, click the "Stop Cron Jobs" button. You can also see the current job settings on the web app page.
+
+Note that you also add a Logtail Heartbeat URL that will be called every time the CRON Job runs if interested, just add a key in the .env for 
+`LOGTAIL_CRON_HEARTBEAT_URL={Your Logtail Cron Heartbeat URL}`.

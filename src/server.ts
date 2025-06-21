@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import { strict as assert } from 'assert';
 import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { backfillAlbumDurations, filterSpotifyLibraryUsingIncludeColumn, importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
-import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings, kFilteringSpotifyLibraryJob } from './defs';
+import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings, kFilteringSpotifyLibraryJob, NotionAlbumDBColumnNames } from './defs';
 import { CronJob } from 'cron';
 import { getSpotifyAlbumIDsFromNotionPage, standardFormatDate } from './helpers';
 import cliProgress from 'cli-progress';
@@ -86,6 +86,17 @@ const albumGenreColumn = "Genre"
 const dateDiscoveredColumn = "Date Discovered";
 const albumDurationColumn = "Duration";
 const includeInSpotifyColumn = "Include in Spotify";
+
+const notionColumnNames: NotionAlbumDBColumnNames = {
+    artist: artistColumn,
+    name: albumNameColumn,
+    spotifyId: albumIdColumn,
+    url: albumURLColumn,
+    dateDiscovered: dateDiscoveredColumn,
+    duration: albumDurationColumn,
+    genre: albumGenreColumn,
+    includeInSpotify: includeInSpotifyColumn
+}
 
 // Middleware
 app.use(express.json()); // parse request bodies as JSON
@@ -210,8 +221,7 @@ app.post('/backfillNotionDatabaseProperties', expressAsyncHandler(async (req: Re
     await backfillAlbumDurations(
         spotify,
         notionDatabaseID,
-        albumIdColumn,
-        albumDurationColumn,
+        notionColumnNames,
         /* logger = */ logger
     )
     res.status(HttpStatus.OK).send(`Backfilled Notion Album Library!`);

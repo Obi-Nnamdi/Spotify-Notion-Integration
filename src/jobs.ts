@@ -9,7 +9,7 @@ import cliProgress from 'cli-progress';
 import { Logger } from 'winston';
 import chalk from 'chalk';
 import { chunkArray, arrayIntersect, arrayDifference, determineAlbumType, getAllAlbumTracks, getAlbumDuration, getNumberField } from "./helpers";
-import { SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
+import { NotionAlbumDBColumnNames, SpotifyAlbumType, spotifyChunkSizeLimit } from "./defs";
 import { getFullPages, getSpotifyAlbumIDsFromNotionPage, createAlbumKey, getFullPlainText, getTitleField, getRichTextField, getArtistStringFromAlbum, constructNotionTextContentBlock, getTitleFieldAsString, getRichTextFieldAsString, getURLFieldAsString, makeStringFromAlbumIDs, createAlbumKeyFromSpotifyAlbum, getFormulaPropertyAsBoolean, getAlbumArtwork, getSelectFieldAsString } from "./helpers";
 import { get } from "node:http";
 
@@ -1140,16 +1140,13 @@ async function changeUserAlbums(spotify: SpotifyApi, albumIDs: string[], method:
  * 
  * @param spotify Spotify API Instance
  * @param notion_database_id ID for Notion Database
- * @param albumIdColumn Column name in Notion Database for Album ID.
- * @param albumDurationColumn Column name in Notion Database for Album Duration
+ * @param notionColumns Record of notion column names for each property.
  * @param logger 
  */
 export async function backfillAlbumDurations(
   spotify: SpotifyApi,
   notion_database_id: string,
-  albumIdColumn: string,
-  albumNameColumn: string,
-  albumDurationColumn: string,
+  notionColumns: Readonly<NotionAlbumDBColumnNames>,
   logger?: Logger | undefined
 ): Promise<void> {
   const loggingFunc = logger?.verbose ?? console.log;
@@ -1158,17 +1155,17 @@ export async function backfillAlbumDurations(
 
   const validDatabasePages = existingDatabasePages.filter(page => {
     // Filter out albums with no ID / already filled durations
-    const albumID = getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn).filter(id => id !== "")[0];
+    const albumID = getSpotifyAlbumIDsFromNotionPage(page, notionColumns.spotifyId).filter(id => id !== "")[0];
     if (albumID === undefined) {
       return false;
     }
-    if (getNumberField(page, albumDurationColumn) !== undefined) {
+    if (getNumberField(page, notionColumns.duration) !== undefined) {
       return false;
     }
     return true;
   })
 
-  const validDatabaseAlbumIDs = validDatabasePages.map(page => getSpotifyAlbumIDsFromNotionPage(page, albumIdColumn).filter(id => id !== "")[0] ?? assert.fail())
+  const validDatabaseAlbumIDs = validDatabasePages.map(page => getSpotifyAlbumIDsFromNotionPage(page, notionColumns.spotifyId).filter(id => id !== "")[0] ?? assert.fail())
   const spotifyAlbums = (await Promise.all(chunkArray(validDatabaseAlbumIDs, spotifyChunkSizeLimit).map(chunk => spotify.albums.get(chunk)))).flat();
 
   loggingFunc("Got all spotify albums.")
@@ -1177,13 +1174,13 @@ export async function backfillAlbumDurations(
     const notionPage = validDatabasePages[index] ?? assert.fail();
 
     return getAlbumDuration(album, spotify).then(albumDuration => {
-      const albumName = getTitleFieldAsString(notionPage, albumNameColumn)
+      const albumName = getTitleFieldAsString(notionPage, notionColumns.name)
       loggingFunc(`Album ${albumName} has duration ${albumDuration} ms.`)
 
       return notion.pages.update({
         page_id: notionPage.id,
         properties: {
-          [albumDurationColumn]: {
+          [notionColumns.duration]: {
             number: albumDuration
           }
         }

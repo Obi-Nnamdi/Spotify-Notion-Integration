@@ -33,3 +33,15 @@ export const spotifyChunkSizeLimit = 20; // max chunk size for most spotify API 
 export enum SpotifyAlbumType {
     ALBUM, EP, SINGLE
 }
+
+// Type for specifying what types of columns are supported in the app.
+export type NotionAlbumDBColumnNames = {
+    name: string // - Note: Should be Title Column.
+    artist: string
+    spotifyId: string
+    url: string
+    genre: string
+    dateDiscovered: string
+    duration: string
+    includeInSpotify?: string
+}

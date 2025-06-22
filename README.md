@@ -13,13 +13,13 @@
       - [Using the Web App](#using-the-web-app)
       - [Logging](#logging)
   - [Scheduling Cron Jobs](#scheduling-cron-jobs)
-  - [Getting "Play" Button Functionality](#getting-play-button-functionality)
+  - [Getting "Play" Button Functionality (Requires Spotify Premium)](#getting-play-button-functionality-requires-spotify-premium)
+
+This project links your Spotify album library to a Notion database, and allows you to perform some operations on any album database you may have in Notion.
 
 ## Gallery
 ![Full Notion Database View Example](./screenshots/fullViewExample1.png)
 ![Single Notion Album View Example](./screenshots/singleViewExample1.png)
-
-This project links your Spotify album library to a Notion database, and allows you to perform some operations on any album database you may have in Notion.
 
 
 ## Features
@@ -61,6 +61,7 @@ SPOTIFY_CLIENT_SECRET={Spotify App Client Secret}
 ```
 
 <!-- TODO: Explain how to get each .env file property -->
+To get the `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`, you need to register for an account as a Spotify Developer and create a development app.
 
 Then, run `npm install` to install dependencies, and depending on what you want to do, execute different commands:
 
@@ -151,10 +152,12 @@ Note that you also add a Logtail Heartbeat URL that will be called every time th
 `LOGTAIL_CRON_HEARTBEAT_URL={Your Logtail Cron Heartbeat URL}`.
 
 
-## Getting "Play" Button Functionality
+## Getting "Play" Button Functionality (Requires Spotify Premium)
 To get a play button in Notion pages working so that you can play the album in Spotify when clicking the Notion page button, you need to set up a Button property with a "webhook" automation that calls the server's "/playAlbum" endpoint with the "Album Name" and "Album ID" columns.
 
 Note that you need an actual URL that routes to your server for this, and can't just use localhost or an IP address. In my case, I used [Ngrok](https://ngrok.com/) to get a public https URL.
+
+Also note that you should add this public access URL to the spotify "redirect URIs" developer API list.
 
 Below is an example of how to set this up:
 ![Image guide for setting up a Notion DB Play Button](./screenshots/playButtonSetupImage.png)

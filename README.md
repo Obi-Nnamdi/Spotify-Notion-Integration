@@ -1,6 +1,6 @@
 # Spotify-Notion Album Database App
-
 - [Spotify-Notion Album Database App](#spotify-notion-album-database-app)
+  - [Gallery](#gallery)
   - [Features](#features)
   - [Getting Started](#getting-started)
     - [Running Notion Album Database jobs (CLI App)](#running-notion-album-database-jobs-cli-app)
@@ -13,7 +13,11 @@
       - [Using the Web App](#using-the-web-app)
       - [Logging](#logging)
   - [Scheduling Cron Jobs](#scheduling-cron-jobs)
+  - [Getting "Play" Button Functionality](#getting-play-button-functionality)
 
+## Gallery
+![Full Notion Database View Example](./screenshots/fullViewExample1.png)
+![Single Notion Album View Example](./screenshots/singleViewExample1.png)
 
 This project links your Spotify album library to a Notion database, and allows you to perform some operations on any album database you may have in Notion.
 
@@ -145,3 +149,12 @@ To stop the jobs, click the "Stop Cron Jobs" button. You can also see the curren
 
 Note that you also add a Logtail Heartbeat URL that will be called every time the CRON Job runs if interested, just add a key in the .env for 
 `LOGTAIL_CRON_HEARTBEAT_URL={Your Logtail Cron Heartbeat URL}`.
+
+
+## Getting "Play" Button Functionality
+To get a play button in Notion pages working so that you can play the album in Spotify when clicking the Notion page button, you need to set up a Button property with a "webhook" automation that calls the server's "/playAlbum" endpoint with the "Album Name" and "Album ID" columns.
+
+Note that you need an actual URL that routes to your server for this, and can't just use localhost or an IP address. In my case, I used [Ngrok](https://ngrok.com/) to get a public https URL.
+
+Below is an example of how to set this up:
+![Image guide for setting up a Notion DB Play Button](./screenshots/playButtonSetupImage.png)

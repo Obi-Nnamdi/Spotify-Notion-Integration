@@ -6,7 +6,7 @@ import { SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { SpotifyAlbum, CronJobSettings, kImportingJob, kUpdatingStaleAlbumsJob, kFilteringSpotifyLibraryJob } from './defs';
 
 const spotifyClientId = process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID in env file.");
-const spotifyScopes = ["user-library-read", "user-library-modify"];
+const spotifyScopes = ["user-library-read", "user-library-modify", "user-modify-playback-state"];
 
 /**
  * Performs server authentication to get Spotify Token, redirecting back to /populateToken.

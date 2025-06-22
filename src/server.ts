@@ -8,7 +8,7 @@ import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { backfillAlbumDurations, filterSpotifyLibraryUsingIncludeColumn, importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
 import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings, kFilteringSpotifyLibraryJob, NotionAlbumDBColumnNames } from './defs';
 import { CronJob } from 'cron';
-import { getSpotifyAlbumIDsFromNotionPage, standardFormatDate } from './helpers';
+import { getSpotifyAlbumIDsFromNotionPage, getTitleFieldAsString, standardFormatDate } from './helpers';
 import cliProgress from 'cli-progress';
 import { DateTime } from 'luxon';;
 import * as fs from 'node:fs';
@@ -330,7 +330,12 @@ catch (Error) {
  * Endpoint that should be triggered off of a Notion webhook automation with "Album ID" as the property name.
  * TODO: Incomplete. Lots of infrastructure required for this.
  */
-app.post('/playAlbum', (req: Request, res: Response) => {
+app.post('/playAlbum', expressAsyncHandler(async (req: Request, res: Response) => {
+    // Can't play anything with no Spotify API.
+    if (spotify === undefined) {
+        res.sendStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+        return;
+    }
     // Make sure we actually got a page from the post body.
     if (!isFullPage(req.body.data)) {
         res.sendStatus(HttpStatus.BAD_REQUEST);
@@ -338,16 +343,23 @@ app.post('/playAlbum', (req: Request, res: Response) => {
     }
     // Get the first album ID from the sent notion page and play it.
     const pageData = req.body.data as PageObjectResponse;
+    const pageTitle = getTitleFieldAsString(pageData, notionColumnNames.name);
     const albumIds = getSpotifyAlbumIDsFromNotionPage(pageData, albumIdColumn);
-    if (albumIds.length == 0) {
+    if (albumIds.length === 0) {
         res.sendStatus(HttpStatus.BAD_REQUEST);
         return;
     }
     const playedAlbumID = albumIds[0];
+    if (playedAlbumID === '') {
+        res.sendStatus(HttpStatus.BAD_REQUEST);
+        return;
+    }
 
-    logger.info(`Playing Album ID: ${chalk.blue(playedAlbumID)}`);
+    await spotify.player.startResumePlayback("", `spotify:album:${playedAlbumID}`)
+
+    logger.info(`Playing Album ${chalk.red(pageTitle)}, ID: ${chalk.blue(playedAlbumID)}`);
     res.sendStatus(HttpStatus.OK);
-})
+}))
 
 /**
  * Job that imports saved spotify albums and puts them into the notion database.

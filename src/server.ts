@@ -354,8 +354,11 @@ app.post('/playAlbum', expressAsyncHandler(async (req: Request, res: Response) =
         res.sendStatus(HttpStatus.BAD_REQUEST);
         return;
     }
-
-    await spotify.player.startResumePlayback("", `spotify:album:${playedAlbumID}`)
+    // Turn off shuffle so the album starts at the beginning
+    // TODO: Could be controlled by a toggle.
+    await spotify.player.togglePlaybackShuffle(false).then(
+        promise => spotify?.player.startResumePlayback("", `spotify:album:${playedAlbumID}`)
+    )
 
     logger.info(`Playing Album ${chalk.red(pageTitle)}, ID: ${chalk.blue(playedAlbumID)}`);
     res.sendStatus(HttpStatus.OK);

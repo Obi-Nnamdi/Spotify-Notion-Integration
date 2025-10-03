@@ -426,3 +426,29 @@ export async function getNotionGenresFromAlbum(album: Album, spotify: SpotifyApi
     return convertSpotifyGenresIntoNotionGenres(
         await getAllArtistGenresFromAlbum(album, spotify), conversionModel)
 }
+
+export async function setSpotifyShuffleState(spotify: SpotifyApi, shuffle: boolean) {
+    return querySpotifyEndpoint(spotify, "https://api.spotify.com/v1/me/player/shuffle", "PUT", {
+        "state": shuffle
+    })
+}
+
+/**
+ * Queries a spotify endpoint with the given method and body.
+ * @param spotify SpotifyApi object to use for authentication.
+ * @param endpoint Endpoint to query.
+ * @param method HTTP method to use (e.g. "PUT", "POST").
+ * @param body Body of the request.
+ */
+export async function querySpotifyEndpoint(spotify: SpotifyApi, endpoint: string, method: string, query: Record<string, any> = {}, body?: Record<string, any>) {
+    const spotifyToken = (await spotify.getAccessToken()) ?? assert.fail("No Spotify Token populated!")
+    return fetch(endpoint + "?" + new URLSearchParams(query), {
+        method: method,
+        headers: {
+            "Authorization": `${spotifyToken.token_type} ${spotifyToken.access_token}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body)
+    }
+    )
+}

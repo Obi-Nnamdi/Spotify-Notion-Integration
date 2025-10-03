@@ -8,7 +8,7 @@ import { Page, SavedAlbum, SpotifyApi } from '@spotify/web-api-ts-sdk';
 import { backfillAlbumDurations, filterSpotifyLibraryUsingIncludeColumn, importSavedSpotifyAlbums, updateStaleNotionAlbumsFromSpotify } from './jobs';
 import { SpotifyAlbum, kImportingJob, kUpdatingStaleAlbumsJob, CronJobSettings, kFilteringSpotifyLibraryJob, NotionAlbumDBColumnNames } from './defs';
 import { CronJob } from 'cron';
-import { getSpotifyAlbumIDsFromNotionPage, getTitleFieldAsString, standardFormatDate } from './helpers';
+import { getSpotifyAlbumIDsFromNotionPage, getTitleFieldAsString, setSpotifyShuffleState, standardFormatDate } from './helpers';
 import cliProgress from 'cli-progress';
 import { DateTime } from 'luxon';;
 import * as fs from 'node:fs';
@@ -334,12 +334,12 @@ app.post('/playAlbum', expressAsyncHandler(async (req: Request, res: Response) =
     // Can't play anything with no Spotify API.
     if (spotify === undefined) {
         res.sendStatus(HttpStatus.INTERNAL_SERVER_ERROR);
-        return;
+        throw new Error("Internal spotify access token wasn't populated!")
     }
     // Make sure we actually got a page from the post body.
     if (!isFullPage(req.body.data)) {
         res.sendStatus(HttpStatus.BAD_REQUEST);
-        return;
+        throw new Error("Notion automation data was improperly formed.")
     }
     // Get the first album ID from the sent notion page and play it.
     const pageData = req.body.data as PageObjectResponse;
@@ -347,18 +347,23 @@ app.post('/playAlbum', expressAsyncHandler(async (req: Request, res: Response) =
     const albumIds = getSpotifyAlbumIDsFromNotionPage(pageData, albumIdColumn);
     if (albumIds.length === 0) {
         res.sendStatus(HttpStatus.BAD_REQUEST);
-        return;
+        throw new Error("No valid album IDs from the Notion page were found.")
     }
     const playedAlbumID = albumIds[0];
     if (playedAlbumID === '') {
         res.sendStatus(HttpStatus.BAD_REQUEST);
-        return;
+        throw new Error("Empty album ID from the Notion page.")
     }
-    // Turn off shuffle so the album starts at the beginning
-    // TODO: Could be controlled by a toggle.
-    await spotify.player.togglePlaybackShuffle(false).then(
-        promise => spotify?.player.startResumePlayback("", `spotify:album:${playedAlbumID}`)
+
+    // Start album at the beginning.
+    await spotify.player.startResumePlayback("", `spotify:album:${playedAlbumID}`,
+        /* uris = */ undefined,
+        /* offset = */ { "position": 0 }
     )
+    // Turn off shuffle so the album goes in order.
+    // TODO: Could be controlled by a toggle or by specific parameters on the notion page itself.
+    // NOTE: Standard Spotify TS SDK function set shuffle function doesn't work.
+    await setSpotifyShuffleState(spotify, false)
 
     logger.info(`Playing Album ${chalk.red(pageTitle)}, ID: ${chalk.blue(playedAlbumID)}`);
     res.sendStatus(HttpStatus.OK);

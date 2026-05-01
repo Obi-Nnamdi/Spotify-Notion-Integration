@@ -34,8 +34,8 @@ const MiBSize = 1024 * 1024;
 const maxFileSize = 50 * MiBSize; // 50 MiB
 const maxLogFiles = 3; // 3 log files max are created when logging.
 const loggingTransports: winston.transport[] = [
-    new winston.transports.File({ filename: path.resolve('logs/error.log'), level: 'error', maxFiles: maxLogFiles, maxsize: maxFileSize }),
-    new winston.transports.File({ filename: path.resolve('logs/combined.log'), maxFiles: maxLogFiles, maxsize: maxFileSize }),
+    // new winston.transports.File({ filename: path.resolve('logs/error.log'), level: 'error', maxFiles: maxLogFiles, maxsize: maxFileSize }),
+    // new winston.transports.File({ filename: path.resolve('logs/combined.log'), maxFiles: maxLogFiles, maxsize: maxFileSize }),
     new winston.transports.Console({
         format: winston.format.combine(
             winston.format.colorize(),

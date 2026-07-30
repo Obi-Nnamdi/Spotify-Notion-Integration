@@ -13,6 +13,7 @@
       - [Using the Web App](#using-the-web-app)
       - [Logging](#logging)
   - [Scheduling Cron Jobs](#scheduling-cron-jobs)
+    - [Refreshing Authentication](#refreshing-authentication)
   - [Getting "Play" Button Functionality (Requires Spotify Premium)](#getting-play-button-functionality-requires-spotify-premium)
 
 This project links your Spotify album library to a Notion database, and allows you to perform some operations on any album database you may have in Notion.
@@ -150,6 +151,10 @@ To stop the jobs, click the "Stop Cron Jobs" button. You can also see the curren
 
 Note that you also add a Logtail Heartbeat URL that will be called every time the CRON Job runs if interested, just add a key in the .env for 
 `LOGTAIL_CRON_HEARTBEAT_URL={Your Logtail Cron Heartbeat URL}`.
+
+### Refreshing Authentication
+
+This flow should work fine for cron jobs *mostly* because tokens will automatically refresh, but after 6 Months or so you'll be needing a completely new token from Spotify (not just a refresh token) due to a [recent change](https://developer.spotify.com/blog/2026-06-18-refresh-token-expiration). You will have to sign out then sign back in on the web app interface to get this token.
 
 
 ## Getting "Play" Button Functionality (Requires Spotify Premium)

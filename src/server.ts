@@ -252,6 +252,7 @@ app.get('/userAlbums', (req: Request, res: Response) => {
 
 // POST: Signs out the current user. 
 app.post('/signout', (req: Request, res: Response) => {
+    spotify?.logOut();
     spotify = undefined;
     cachedSavedAlbums = [];
     logger.info("Logged Out!");
@@ -309,7 +310,7 @@ try {
         passphrase: process.env.CERT_PASSPHRASE ?? assert.fail("No Cert Passphrase")
     };
     https.createServer(certOptions, app).listen(port, () => {
-        logger.info(`Server is listening at https://localhost:${port}`);
+        logger.info(`Server is listening at https://127.0.0.1:${port}`);
         if (ipAdress !== undefined) {
             logger.info(`Server is also listening at https://${ipAdress}:${port}`);
         }
@@ -403,6 +404,7 @@ async function runImportingJob() {
     catch (error) {
         logger.error("Error occurred while running importing job!");
         logger.error(error);
+        throw error;
     }
 }
 
@@ -437,6 +439,7 @@ async function runStaleAlbumUpdaterJob() {
     catch (error) {
         logger.error("Error occurred while running stale album updating job!");
         logger.error(error);
+        throw error;
     }
 }
 
@@ -469,6 +472,7 @@ async function runSpotifyLibraryFilteringJob() {
     catch (error) {
         logger.error("Error occurred while running spotify library filtering job!");
         logger.error(error);
+        throw error;
     }
 }
 
@@ -477,20 +481,31 @@ async function runSpotifyLibraryFilteringJob() {
  */
 async function runAlbumDBJobs() {
     logger.info(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Jobs...")}`);
-    if (cronJobFlags.get(kImportingJob)) {
-        await runImportingJob();
+    try {
+    // Each job should throw an error if it encounters one.
+    // TODO: Get jobs to neatly give the API response that triggered its error?
+        if (cronJobFlags.get(kImportingJob)) {
+            await runImportingJob();
+        }
+        if (cronJobFlags.get(kUpdatingStaleAlbumsJob)) {
+            await runStaleAlbumUpdaterJob();
+        }
+        if (cronJobFlags.get(kFilteringSpotifyLibraryJob)) {
+            await runSpotifyLibraryFilteringJob();
+        }
     }
-    if (cronJobFlags.get(kUpdatingStaleAlbumsJob)) {
-        await runStaleAlbumUpdaterJob();
+    catch (error) {
+        // TODO: Perform extra processing depending on the error?
+        logger.error("Caught error when running cron job, not triggering heartbeat.")
+        return;
     }
-    if (cronJobFlags.get(kFilteringSpotifyLibraryJob)) {
-        await runSpotifyLibraryFilteringJob();
-    }
+
     logger.info(`Done! Jobs will next run at ${standardFormatDate(albumDBJobs.nextDate())}`);
     // Send a heartbeat to logtail for monitoring.
     if (process.env.LOGTAIL_CRON_HEARTBEAT_URL !== undefined) {
         fetch(process.env.LOGTAIL_CRON_HEARTBEAT_URL);
     }
+
 }
 
 /**

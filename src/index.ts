@@ -203,6 +203,13 @@ importJobStopButton.onclick = async () => {
 // Send post request to "/signout" when signout button is clicked
 const signoutButton = document.getElementById("signoutButton") ?? assert.fail("Bad ID");
 signoutButton.onclick = async () => {
+    // NOTE: This is a bit of a hack (possibly) that clears the local storage for the old token,
+    // to force Spotify to give you a new access token. 
+    // See the official SDK implementation of how they get do authorization: https://github.com/spotify/spotify-web-api-ts-sdk/blob/c6f34491eaa17ab73698d5464ee10332d0c551cc/src/SpotifyApi.ts#L209
+    // Added because refresh tokens were recently made expirable after 6 Months: 
+    // https://developer.spotify.com/blog/2026-06-18-refresh-token-expiration
+    localStorage.removeItem("spotify-sdk:AuthorizationCodeWithPKCEStrategy:token")
+
     await fetch("/signout", { method: "POST" });
     await updatePage();
 }

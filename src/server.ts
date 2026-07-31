@@ -28,6 +28,7 @@ dotenv.config();
 // Globals (I know, I know...)
 let spotify: SpotifyApi | undefined = undefined;
 let cachedSavedAlbums: SavedAlbum[] = [];
+let refreshToken: string | undefined = undefined;
 
 // Logging Globals
 const MiBSize = 1024 * 1024;
@@ -59,6 +60,7 @@ const logger = winston.createLogger({
 // Server Globals
 const app: Application = express();
 const port = process.env.PORT || 3000;
+const spotify_client_id = process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID");
 
 // Cron Job Globals
 const cronJobFlags = new Map<string, boolean>([
@@ -133,9 +135,14 @@ app.get('/', (req: Request, res: Response) => {
 app.post('/populateToken', (req: Request, res: Response) => {
     logger.verbose(JSON.stringify(req.body));
     spotify = SpotifyApi.withAccessToken(
-        process.env.SPOTIFY_CLIENT_ID ?? assert.fail("No Spotify Client ID"),
+        spotify_client_id,
         req.body
     );
+    // Save our refresh token
+    if (req.body.refresh_token) {
+        logger.info("Refreshing refresh token.")
+        refreshToken = req.body.refresh_token as string
+    }
     res.status(HttpStatus.OK).type('text').send('Post Request Recieved!')
 });
 
@@ -301,8 +308,22 @@ app.get('/cronJobSettings', (req: Request, res: Response) => {
     res.send(jobSettings);
 });
 
+/**
+ * Debug route for manually triggering a token refresh.
+ */
+app.post('/refreshToken', expressAsyncHandler(async (req: Request, res: Response) => {
+    try {
+        await refreshSpotifyAccessToken();
+        res.sendStatus(HttpStatus.OK);
+    }
+    catch (error) {
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).send(error)
+    }
+
+}))
+
 // Try and start an https server using secure credentials if we have them
-const ipAdress = os.networkInterfaces().en0?.filter(i => i.family === "IPv4")[0]?.address;
+const ipAddress = os.networkInterfaces().en0?.filter(i => i.family === "IPv4")[0]?.address;
 try {
     const certOptions = {
         key: fs.readFileSync(path.resolve("./cert/key.pem")),
@@ -311,8 +332,8 @@ try {
     };
     https.createServer(certOptions, app).listen(port, () => {
         logger.info(`Server is listening at https://127.0.0.1:${port}`);
-        if (ipAdress !== undefined) {
-            logger.info(`Server is also listening at https://${ipAdress}:${port}`);
+        if (ipAddress !== undefined) {
+            logger.info(`Server is also listening at https://${ipAddress}:${port}`);
         }
     });
 }
@@ -321,8 +342,8 @@ catch (Error) {
     logger.info("Unable to start https server, moving to http server...");
     app.listen(port, () => {
         logger.info(`Server is listening at http://localhost:${port}`);
-        if (ipAdress !== undefined) {
-            logger.info(`Server is also listening at http://${ipAdress}:${port}`);
+        if (ipAddress !== undefined) {
+            logger.info(`Server is also listening at http://${ipAddress}:${port}`);
         }
     });
 }
@@ -403,7 +424,6 @@ async function runImportingJob() {
     }
     catch (error) {
         logger.error("Error occurred while running importing job!");
-        logger.error(error);
         throw error;
     }
 }
@@ -438,7 +458,6 @@ async function runStaleAlbumUpdaterJob() {
     }
     catch (error) {
         logger.error("Error occurred while running stale album updating job!");
-        logger.error(error);
         throw error;
     }
 }
@@ -471,7 +490,6 @@ async function runSpotifyLibraryFilteringJob() {
     }
     catch (error) {
         logger.error("Error occurred while running spotify library filtering job!");
-        logger.error(error);
         throw error;
     }
 }
@@ -482,8 +500,13 @@ async function runSpotifyLibraryFilteringJob() {
 async function runAlbumDBJobs() {
     logger.info(`[${standardFormatDate(DateTime.now())}] ${chalk.blue("Running Jobs...")}`);
     try {
-    // Each job should throw an error if it encounters one.
-    // TODO: Get jobs to neatly give the API response that triggered its error?
+        // Refresh our access token manually.
+        // TODO: This may be too many times, and I can potentially just do a check
+        // to see if our token has expired.
+        await refreshSpotifyAccessToken();
+
+        // Each job should throw an error if it encounters one.
+        // TODO: Get jobs to neatly give the API response that triggered its error?
         if (cronJobFlags.get(kImportingJob)) {
             await runImportingJob();
         }
@@ -497,6 +520,7 @@ async function runAlbumDBJobs() {
     catch (error) {
         // TODO: Perform extra processing depending on the error?
         logger.error("Caught error when running cron job, not triggering heartbeat.")
+        logger.error(error);
         return;
     }
 
@@ -506,6 +530,53 @@ async function runAlbumDBJobs() {
         fetch(process.env.LOGTAIL_CRON_HEARTBEAT_URL);
     }
 
+}
+
+/**
+ * Manually refresh our cached spotify instance with the cached refresh token.
+ * Created to account for the Spotify Developer API changes w.r.t refresh token expiration:
+ * https://developer.spotify.com/blog/2026-06-18-refresh-token-expiration
+ * 
+ * TODO: Only do it when the token has expired.
+ */
+async function refreshSpotifyAccessToken() {
+    assert(refreshToken !== undefined, "Non-existant refresh token.");
+    const refresh_token_url = "https://accounts.spotify.com/api/token";
+
+    const payload = {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken,
+            client_id: spotify_client_id
+        }),
+    };
+    const result = await fetch(refresh_token_url, payload);
+    const response = await result.json();
+
+    if (!result.ok) {
+        if (response.error === 'invalid_grant') {
+            // Throw away expired refresh token.
+            refreshToken = undefined;
+            throw new Error(`Refresh token is invalid. User must be reauthorized.`);
+        }
+
+        throw new Error(`Token refresh failed: ${response.error}`);
+    }
+
+    // Re-authenticate our spotify instance
+    spotify?.logOut();
+    spotify = SpotifyApi.withAccessToken(spotify_client_id, response);
+    logger.info(`New Access Token: ${JSON.stringify(response)}`)
+
+    // Store our new refresh token if we have one
+    if (response.refresh_token) {
+        refreshToken = response.refresh_token;
+        logger.info(`Retrieved new refresh token: "${refreshToken}"`)
+    }
 }
 
 /**
